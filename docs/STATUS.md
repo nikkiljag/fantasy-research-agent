@@ -17,6 +17,10 @@ Sleeper data integration.
 * Retrieved Sleeper's NFL player database.
 * Added local player-data caching.
 * Converted roster player IDs into names, positions, and NFL teams.
+- Refactored Sleeper integration into reusable functions.
+- Added `sleeper.py` for Sleeper API/data logic.
+- Added `main.py` as the backend entry point.
+- Removed the original test script.
 
 ## Current Working Flow
 
