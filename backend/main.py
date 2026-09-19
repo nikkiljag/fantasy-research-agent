@@ -1,50 +1,86 @@
 from ai.foundry_local import (
-    run_local_chat,
+    stop_model,
+)
+
+from ai.research_agent import (
+    research,
 )
 
 
-print(
-    "\n=============================="
-)
+print("\n==============================")
+print("FANTASY RESEARCH AGENT")
+print("==============================")
 
-print(
-    "FOUNDRY LOCAL TEST"
-)
 
-print(
-    "=============================="
+question = input(
+    "\nAsk a fantasy football question: "
 )
 
 
-messages = [
-    {
-        "role": "system",
-        "content": (
-            "You are the AI reasoning component of a "
-            "fantasy football research application. "
-            "Answer clearly and concisely."
-        ),
-    },
-    {
-        "role": "user",
-        "content": (
-            "In one sentence, explain why target volume "
-            "can matter for evaluating a fantasy football "
-            "wide receiver."
-        ),
-    },
-]
+try:
+
+    result = research(
+        question
+    )
+
+    print(
+        "\n=============================="
+    )
+
+    print(
+        "GENERATED SQL"
+    )
+
+    print(
+        "==============================\n"
+    )
+
+    print(
+        result["sql"]
+    )
 
 
-response = run_local_chat(
-    messages
-)
+    print(
+        "\n=============================="
+    )
+
+    print(
+        "DATABASE RESULTS"
+    )
+
+    print(
+        "==============================\n"
+    )
+
+    print(
+        result["results"]
+    )
 
 
-print(
-    "\nLocal AI response:\n"
-)
+    print(
+        "\n=============================="
+    )
 
-print(
-    response
-)
+    print(
+        "AI ANSWER"
+    )
+
+    print(
+        "==============================\n"
+    )
+
+    print(
+        result["answer"]
+    )
+
+
+except Exception as error:
+
+    print(
+        f"\nResearch failed: {error}"
+    )
+
+
+finally:
+
+    stop_model()

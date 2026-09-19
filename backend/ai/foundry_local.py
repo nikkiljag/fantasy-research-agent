@@ -7,11 +7,13 @@ from foundry_local_sdk import (
 MODEL_ALIAS = "qwen2.5-0.5b"
 
 _initialized = False
+_model = None
+_client = None
 
 
 def initialize_foundry():
     """
-    Initialize Foundry Local once for this Python process.
+    Initialize Foundry Local once for this process.
     """
 
     global _initialized
@@ -31,70 +33,76 @@ def initialize_foundry():
     return FoundryLocalManager.instance
 
 
-def get_model():
+def start_model():
     """
-    Get the configured local model from
-    the Foundry Local catalog.
+    Download and load the configured model once.
     """
+
+    global _model
+    global _client
+
+    if _client is not None:
+        return _client
 
     manager = initialize_foundry()
 
-    return manager.catalog.get_model(
+    _model = manager.catalog.get_model(
         MODEL_ALIAS
     )
 
-
-def run_local_chat(messages):
-    """
-    Download/load the local model, send a chat request,
-    return its response, and unload the model afterward.
-
-    This is intentionally simple for our first test.
-    """
-
-    model = get_model()
-
     print(
-        f"\nPreparing local model: "
-        f"{MODEL_ALIAS}"
+        f"\nPreparing local model: {MODEL_ALIAS}"
     )
 
-    model.download(
+    _model.download(
         lambda progress: print(
-            f"\rModel download: "
-            f"{progress:.1f}%",
+            f"\rModel download: {progress:.1f}%",
             end="",
             flush=True,
         )
     )
 
-    print()
+    print("\nLoading model...")
 
-    print(
-        "Loading model..."
+    _model.load()
+
+    _client = _model.get_chat_client()
+
+    return _client
+
+
+def complete_chat(messages):
+    """
+    Send messages to the currently loaded local model.
+    """
+
+    client = start_model()
+
+    response = client.complete_chat(
+        messages
     )
 
-    model.load()
+    return (
+        response
+        .choices[0]
+        .message
+        .content
+    )
 
-    try:
 
-        client = model.get_chat_client()
+def stop_model():
+    """
+    Unload the local model.
+    """
 
-        response = client.complete_chat(
-            messages
-        )
+    global _model
+    global _client
 
-        return (
-            response
-            .choices[0]
-            .message
-            .content
-        )
+    if _model is not None:
 
-    finally:
+        _model.unload()
 
-        model.unload()
+        print("\nModel unloaded.")
 
-        print(
-            "\nModel unloaded."
-        )
+    _model = None
+    _client = None
