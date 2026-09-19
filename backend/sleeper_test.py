@@ -4,7 +4,8 @@ from pathlib import Path
 import requests
 
 
-CACHE_FILE = Path("cache/sleeper_players.json")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CACHE_FILE = PROJECT_ROOT / "data" / "cache" / "sleeper_players.json"
 
 
 def get_all_players():
@@ -49,6 +50,8 @@ leagues_url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{season}"
 leagues = requests.get(leagues_url).json()
 
 league = leagues[0]
+scoring_settings = league["scoring_settings"]
+roster_positions = league["roster_positions"]
 league_id = league["league_id"]
 
 # Get league rosters
@@ -72,17 +75,43 @@ players = get_all_players()
 print(f"\nLeague: {league['name']}")
 print(f"Record: {my_roster['settings'].get('wins', 0)}-{my_roster['settings'].get('losses', 0)}")
 
-print("\nYour roster:")
+print("\nRoster positions:")
+print(roster_positions)
 
-for player_id in my_roster["players"]:
+print("\nImportant scoring settings:")
+print("Passing TD:", scoring_settings.get("pass_td", 0))
+print("Passing yards:", scoring_settings.get("pass_yd", 0))
+print("Rushing yards:", scoring_settings.get("rush_yd", 0))
+print("Receiving yards:", scoring_settings.get("rec_yd", 0))
+print("Reception:", scoring_settings.get("rec", 0))
+
+starters = my_roster["starters"]
+all_players = my_roster["players"]
+
+bench = [player_id for player_id in all_players if player_id not in starters]
+
+print("\nSTARTERS")
+
+for player_id in starters:
     player = players.get(player_id)
 
     if player:
         name = player.get("full_name", player_id)
         position = player.get("position", "")
         team = player.get("team", "")
-
         print(f"{name} | {position} | {team}")
     else:
-        # Sleeper also uses IDs such as "PIT" for team defenses
+        print(f"{player_id} | DEF")
+
+print("\nBENCH")
+
+for player_id in bench:
+    player = players.get(player_id)
+
+    if player:
+        name = player.get("full_name", player_id)
+        position = player.get("position", "")
+        team = player.get("team", "")
+        print(f"{name} | {position} | {team}")
+    else:
         print(f"{player_id} | DEF")
