@@ -1,290 +1,86 @@
-from database import (
-    list_tables,
-    query_dataframe,
-    save_league_nfl_data,
-    save_league_ownership,
-    save_team_data,
-)
-
-from nflverse import (
-    get_all_snap_counts,
-    get_all_weekly_stats,
-    get_all_weekly_status,
-    get_player_identity_table,
-)
-
-from services.fantasy_data import (
-    get_team_context,
-)
-
-from services.league_data import (
-    get_league_ownership,
-)
-
-from services.player_week import (
-    build_player_week_table,
+from services.research import (
+    get_database_schema,
+    run_research_query,
 )
 
 
-username = input(
-    "Enter your Sleeper username: "
-)
+print("\n==============================")
+print("RESEARCH DATABASE")
+print("==============================")
 
 
-# ==================================================
-# USER TEAM
-# ==================================================
+schema = get_database_schema()
 
-try:
+print("\nAvailable tables:")
 
-    team = get_team_context(
-        username
-    )
-
-except ValueError as error:
-
+for table_name in schema:
     print(
-        f"\nError: {error}"
+        f"- {table_name}: "
+        f"{len(schema[table_name])} columns"
     )
 
-    raise SystemExit
+
+print("\n==============================")
+print("RESEARCH QUERY TEST")
+print("==============================")
 
 
-league_id = (
-    team["league"]["league_id"]
+query = """
+SELECT
+    name,
+    position,
+    team,
+
+    COUNT(*) AS games,
+
+    ROUND(
+        AVG(
+            COALESCE(targets, 0)
+            +
+            COALESCE(carries, 0)
+        ),
+        2
+    ) AS avg_opportunities,
+
+    ROUND(
+        AVG(offense_pct) * 100,
+        1
+    ) AS avg_snap_pct,
+
+    ROUND(
+        AVG(fantasy_points_ppr),
+        2
+    ) AS avg_ppr
+
+FROM player_week
+
+WHERE position IN (
+    'RB',
+    'WR',
+    'TE'
 )
 
-
-# ==================================================
-# LEAGUE OWNERSHIP
-# ==================================================
-
-print(
-    "\nLoading league ownership..."
-)
-
-league_ownership = (
-    get_league_ownership(
-        league_id
-    )
-)
-
-print(
-    f"Rostered entities: "
-    f"{league_ownership.height}"
-)
-
-
-# ==================================================
-# NFL PLAYER IDENTITIES
-# ==================================================
-
-print(
-    "\nLoading NFL player identities..."
-)
-
-player_identity = (
-    get_player_identity_table()
-)
-
-print(
-    f"Mapped NFL players: "
-    f"{player_identity.height}"
-)
-
-
-# ==================================================
-# LEAGUE-WIDE NFL DATA
-# ==================================================
-
-print(
-    "\nLoading weekly NFL stats..."
-)
-
-all_weekly_stats = (
-    get_all_weekly_stats(
-        season=2026
-    )
-)
-
-print(
-    f"Weekly stat rows: "
-    f"{all_weekly_stats.height}"
-)
-
-
-print(
-    "\nLoading NFL snap counts..."
-)
-
-all_snap_counts = (
-    get_all_snap_counts(
-        season=2026
-    )
-)
-
-print(
-    f"Snap-count rows: "
-    f"{all_snap_counts.height}"
-)
-
-
-print(
-    "\nLoading weekly NFL roster status..."
-)
-
-all_weekly_status = (
-    get_all_weekly_status(
-        season=2026
-    )
-)
-
-print(
-    f"Weekly status rows: "
-    f"{all_weekly_status.height}"
-)
-
-
-# ==================================================
-# UNIFIED PLAYER-WEEK TABLE
-# ==================================================
-
-print(
-    "\nBuilding unified player-week table..."
-)
-
-player_week = build_player_week_table(
-    all_weekly_stats,
-    all_snap_counts,
-    all_weekly_status,
-)
-
-print(
-    f"Player-week rows: "
-    f"{player_week.height}"
-)
-
-
-# ==================================================
-# SAVE EVERYTHING TO DUCKDB
-# ==================================================
-
-print(
-    "\nSaving data to DuckDB..."
-)
-
-save_team_data(
+GROUP BY
+    sleeper_id,
+    name,
+    position,
     team
-)
 
-save_league_ownership(
-    league_ownership
-)
+ORDER BY
+    avg_opportunities DESC
 
-save_league_nfl_data(
-    player_identity,
-    all_weekly_stats,
-    all_snap_counts,
-    all_weekly_status,
-    player_week,
-)
+LIMIT 10
+"""
 
-print(
-    "Database updated successfully."
+
+results = run_research_query(
+    query
 )
 
 print(
-    "Database tables:",
-    list_tables(),
-)
-
-
-# ==================================================
-# USAGE-BASED WAIVER QUERY
-# ==================================================
-
-print(
-    "\n=============================="
+    "\nHighest-usage fantasy players:\n"
 )
 
 print(
-    "USAGE-BASED WAIVER TEST"
-)
-
-print(
-    "=============================="
-)
-
-
-waiver_results = query_dataframe(
-    """
-    SELECT
-        pw.name,
-        pw.position,
-        pw.team,
-
-        COUNT(*) AS games,
-
-        ROUND(
-            AVG(
-                COALESCE(pw.targets, 0)
-                +
-                COALESCE(pw.carries, 0)
-            ),
-            2
-        ) AS avg_opportunities,
-
-        ROUND(
-            AVG(pw.offense_pct) * 100,
-            1
-        ) AS avg_snap_pct,
-
-        ROUND(
-            AVG(pw.fantasy_points_ppr),
-            2
-        ) AS avg_ppr,
-
-        SUM(
-            COALESCE(pw.targets, 0)
-        ) AS total_targets,
-
-        SUM(
-            COALESCE(pw.carries, 0)
-        ) AS total_carries
-
-    FROM player_week AS pw
-
-    LEFT JOIN league_ownership AS own
-        ON pw.sleeper_id = own.sleeper_id
-
-    WHERE
-        own.sleeper_id IS NULL
-
-        AND pw.position IN (
-            'RB',
-            'WR',
-            'TE'
-        )
-
-    GROUP BY
-        pw.sleeper_id,
-        pw.name,
-        pw.position,
-        pw.team
-
-    ORDER BY
-        avg_opportunities DESC,
-        avg_snap_pct DESC
-
-    LIMIT 20
-    """
-)
-
-
-print(
-    "\nTop available players by usage:\n"
-)
-
-print(
-    waiver_results
+    results
 )
