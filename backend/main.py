@@ -1,86 +1,50 @@
-from services.research import (
-    get_database_schema,
-    run_research_query,
+from ai.foundry_local import (
+    run_local_chat,
 )
 
 
-print("\n==============================")
-print("RESEARCH DATABASE")
-print("==============================")
+print(
+    "\n=============================="
+)
+
+print(
+    "FOUNDRY LOCAL TEST"
+)
+
+print(
+    "=============================="
+)
 
 
-schema = get_database_schema()
-
-print("\nAvailable tables:")
-
-for table_name in schema:
-    print(
-        f"- {table_name}: "
-        f"{len(schema[table_name])} columns"
-    )
-
-
-print("\n==============================")
-print("RESEARCH QUERY TEST")
-print("==============================")
-
-
-query = """
-SELECT
-    name,
-    position,
-    team,
-
-    COUNT(*) AS games,
-
-    ROUND(
-        AVG(
-            COALESCE(targets, 0)
-            +
-            COALESCE(carries, 0)
+messages = [
+    {
+        "role": "system",
+        "content": (
+            "You are the AI reasoning component of a "
+            "fantasy football research application. "
+            "Answer clearly and concisely."
         ),
-        2
-    ) AS avg_opportunities,
+    },
+    {
+        "role": "user",
+        "content": (
+            "In one sentence, explain why target volume "
+            "can matter for evaluating a fantasy football "
+            "wide receiver."
+        ),
+    },
+]
 
-    ROUND(
-        AVG(offense_pct) * 100,
-        1
-    ) AS avg_snap_pct,
 
-    ROUND(
-        AVG(fantasy_points_ppr),
-        2
-    ) AS avg_ppr
-
-FROM player_week
-
-WHERE position IN (
-    'RB',
-    'WR',
-    'TE'
+response = run_local_chat(
+    messages
 )
 
-GROUP BY
-    sleeper_id,
-    name,
-    position,
-    team
 
-ORDER BY
-    avg_opportunities DESC
-
-LIMIT 10
-"""
-
-
-results = run_research_query(
-    query
+print(
+    "\nLocal AI response:\n"
 )
 
 print(
-    "\nHighest-usage fantasy players:\n"
-)
-
-print(
-    results
+    response
 )
