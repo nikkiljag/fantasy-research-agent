@@ -8,7 +8,7 @@ import polars as pl
 
 def load_player_id_map():
     """
-    Load nflverse's cross-platform fantasy player ID mappings.
+    Load nflverse cross-platform player ID mappings.
     """
     return nfl.load_ff_playerids()
 
@@ -31,13 +31,17 @@ def build_roster_mapping(sleeper_player_ids):
 
     return (
         player_ids
-        .filter(pl.col("sleeper_id").is_in(numeric_ids))
+        .filter(
+            pl.col("sleeper_id").is_in(numeric_ids)
+        )
         .select([
             pl.col("gsis_id").alias("player_id"),
             "name",
             "position",
             "team",
-            "sleeper_id",
+            pl.col("sleeper_id")
+            .cast(pl.Utf8)
+            .alias("sleeper_id"),
         ])
     )
 
@@ -50,30 +54,48 @@ def load_weekly_stats(season=2026):
     """
     Load nflverse weekly player statistics.
     """
+
     return nfl.load_player_stats(
         seasons=season,
-        summary_level="week"
+        summary_level="week",
     )
 
 
-def get_roster_weekly_stats(roster_mapping, season=2026):
+def get_roster_weekly_stats(
+    roster_mapping,
+    season=2026,
+):
     """
-    Join fantasy roster players to nflverse weekly NFL stats.
+    Join fantasy roster players to weekly NFL statistics.
     """
 
     stats = load_weekly_stats(season)
 
-    return stats.join(
-        roster_mapping,
-        on="player_id",
-        how="inner"
+    roster_info = roster_mapping.select([
+        "player_id",
+        "name",
+        "position",
+        "team",
+        "sleeper_id",
+    ])
+
+    return (
+        stats
+        .join(
+            roster_info,
+            on="player_id",
+            how="inner",
+        )
     )
 
 
-def get_players_missing_stats(roster_mapping, roster_stats):
+def get_players_missing_stats(
+    roster_mapping,
+    roster_stats,
+):
     """
-    Identify mapped fantasy players who currently have
-    no weekly nflverse stat rows.
+    Identify mapped fantasy players who currently
+    have no weekly nflverse statistical rows.
     """
 
     players_with_stats = set(
@@ -91,7 +113,9 @@ def get_players_missing_stats(roster_mapping, roster_stats):
         .to_list()
     )
 
-    missing_ids = mapped_ids - players_with_stats
+    missing_ids = (
+        mapped_ids - players_with_stats
+    )
 
     if not missing_ids:
         return pl.DataFrame()
@@ -121,6 +145,7 @@ def load_snap_counts(season=2026):
     """
     Load NFL snap-count data.
     """
+
     return nfl.load_snap_counts(
         seasons=season
     )
@@ -128,11 +153,8 @@ def load_snap_counts(season=2026):
 
 def build_gsis_to_pfr_mapping():
     """
-    Build a bridge between GSIS player IDs and
+    Build a bridge between GSIS IDs and
     Pro Football Reference player IDs.
-
-    Snap-count data uses PFR IDs, while most of our
-    player-stat data uses GSIS IDs.
     """
 
     players = nfl.load_players()
@@ -140,30 +162,38 @@ def build_gsis_to_pfr_mapping():
     return (
         players
         .select([
-            pl.col("gsis_id").alias("player_id"),
-            pl.col("pfr_id").alias("pfr_player_id"),
+            pl.col("gsis_id")
+            .alias("player_id"),
+
+            pl.col("pfr_id")
+            .alias("pfr_player_id"),
         ])
         .drop_nulls()
     )
 
 
-def get_roster_snap_counts(roster_mapping, season=2026):
+def get_roster_snap_counts(
+    roster_mapping,
+    season=2026,
+):
     """
-    Retrieve snap-count data for players on a fantasy roster.
+    Retrieve snap-count data for players
+    on the fantasy roster.
     """
 
     snap_counts = load_snap_counts(season)
 
     id_bridge = build_gsis_to_pfr_mapping()
 
-    # Convert snap-count PFR IDs into GSIS IDs
-    snaps_with_gsis = snap_counts.join(
-        id_bridge,
-        on="pfr_player_id",
-        how="inner"
+    snaps_with_gsis = (
+        snap_counts
+        .join(
+            id_bridge,
+            on="pfr_player_id",
+            how="inner",
+        )
     )
 
-    # Attach our Sleeper/fantasy information
     roster_info = roster_mapping.select([
         "player_id",
         "name",
@@ -171,10 +201,13 @@ def get_roster_snap_counts(roster_mapping, season=2026):
         "sleeper_id",
     ])
 
-    return snaps_with_gsis.join(
-        roster_info,
-        on="player_id",
-        how="inner"
+    return (
+        snaps_with_gsis
+        .join(
+            roster_info,
+            on="player_id",
+            how="inner",
+        )
     )
 
 
@@ -184,35 +217,41 @@ def get_roster_snap_counts(roster_mapping, season=2026):
 
 def load_weekly_rosters(season=2026):
     """
-    Load NFL week-by-week roster data.
-
-    This helps determine whether players were active,
-    inactive, on reserve, suspended, etc.
+    Load week-by-week NFL roster information.
     """
+
     return nfl.load_rosters_weekly(
         seasons=season
     )
 
 
-def get_roster_weekly_status(roster_mapping, season=2026):
+def get_roster_weekly_status(
+    roster_mapping,
+    season=2026,
+):
     """
     Retrieve weekly NFL roster status for players
     on the fantasy roster.
     """
 
-    weekly_rosters = load_weekly_rosters(season)
+    weekly_rosters = (
+        load_weekly_rosters(season)
+    )
 
-    # Our existing roster mapping calls the GSIS column
-    # "player_id", so rename it back to gsis_id for this join.
     roster_info = roster_mapping.select([
-        pl.col("player_id").alias("gsis_id"),
+        pl.col("player_id")
+        .alias("gsis_id"),
+
         "name",
         "position",
         "sleeper_id",
     ])
 
-    return weekly_rosters.join(
-        roster_info,
-        on="gsis_id",
-        how="inner"
+    return (
+        weekly_rosters
+        .join(
+            roster_info,
+            on="gsis_id",
+            how="inner",
+        )
     )
