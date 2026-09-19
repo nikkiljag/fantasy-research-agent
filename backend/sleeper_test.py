@@ -1,41 +1,88 @@
+import json
+from pathlib import Path
+
 import requests
+
+
+CACHE_FILE = Path("cache/sleeper_players.json")
+
+
+def get_all_players():
+    if CACHE_FILE.exists():
+        print("Loading player data from local cache...")
+        with open(CACHE_FILE, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+    print("Downloading Sleeper player database...")
+
+    url = "https://api.sleeper.app/v1/players/nfl"
+    response = requests.get(url)
+    response.raise_for_status()
+
+    players = response.json()
+
+    CACHE_FILE.parent.mkdir(exist_ok=True)
+
+    with open(CACHE_FILE, "w", encoding="utf-8") as file:
+        json.dump(players, file)
+
+    print("Player database cached locally.")
+
+    return players
+
 
 username = input("Enter your Sleeper username: ")
 
-# Get Sleeper user
+# Get user
 user_url = f"https://api.sleeper.app/v1/user/{username}"
-user_response = requests.get(user_url)
+user = requests.get(user_url).json()
 
-if user_response.status_code != 200:
-    print("Failed to retrieve Sleeper user.")
-    raise SystemExit
-
-user = user_response.json()
-
-if user is None:
+if not user:
     print("Sleeper user not found.")
     raise SystemExit
 
 user_id = user["user_id"]
 
-print(f"\nFound user: {user['display_name']}")
-
-# Get 2026 leagues
+# Get user's 2026 leagues
 season = 2026
 leagues_url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{season}"
+leagues = requests.get(leagues_url).json()
 
-leagues_response = requests.get(leagues_url)
+league = leagues[0]
+league_id = league["league_id"]
 
-if leagues_response.status_code != 200:
-    print("Failed to retrieve leagues.")
+# Get league rosters
+rosters_url = f"https://api.sleeper.app/v1/league/{league_id}/rosters"
+rosters = requests.get(rosters_url).json()
+
+my_roster = None
+
+for roster in rosters:
+    if roster["owner_id"] == user_id:
+        my_roster = roster
+        break
+
+if my_roster is None:
+    print("Could not find your roster.")
     raise SystemExit
 
-leagues = leagues_response.json()
+# Load Sleeper player database
+players = get_all_players()
 
-print(f"\n2026 leagues found: {len(leagues)}")
+print(f"\nLeague: {league['name']}")
+print(f"Record: {my_roster['settings'].get('wins', 0)}-{my_roster['settings'].get('losses', 0)}")
 
-for index, league in enumerate(leagues, start=1):
-    print(f"\n{index}. {league['name']}")
-    print(f"   League ID: {league['league_id']}")
-    print(f"   Teams: {league['total_rosters']}")
-    print(f"   Status: {league['status']}")
+print("\nYour roster:")
+
+for player_id in my_roster["players"]:
+    player = players.get(player_id)
+
+    if player:
+        name = player.get("full_name", player_id)
+        position = player.get("position", "")
+        team = player.get("team", "")
+
+        print(f"{name} | {position} | {team}")
+    else:
+        # Sleeper also uses IDs such as "PIT" for team defenses
+        print(f"{player_id} | DEF")
