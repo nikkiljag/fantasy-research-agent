@@ -1,5 +1,6 @@
 from database import (
     list_tables,
+    query_dataframe,
     save_team_data,
 )
 
@@ -47,6 +48,36 @@ print(
     list_tables(),
 )
 
+# ==================================================
+# DATABASE QUERY TEST
+# ==================================================
+
+print("\n==============================")
+print("DATABASE QUERY TEST")
+print("==============================")
+
+query = """
+SELECT
+    name,
+    position,
+    COUNT(*) AS games,
+    ROUND(
+        AVG(fantasy_points_ppr),
+        2
+    ) AS avg_ppr,
+    SUM(targets) AS targets,
+    SUM(carries) AS carries
+FROM weekly_stats
+GROUP BY
+    name,
+    position
+ORDER BY
+    avg_ppr DESC
+"""
+
+results = query_dataframe(query)
+
+print(results)
 
 # ==================================================
 # TEAM OVERVIEW
