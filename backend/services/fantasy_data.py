@@ -1,3 +1,5 @@
+import polars as pl
+
 from sleeper import (
     get_all_players,
     get_leagues,
@@ -13,6 +15,119 @@ from nflverse import (
     get_roster_weekly_status,
 )
 
+def build_player_contexts(
+    roster,
+    sleeper_players,
+    roster_mapping,
+    weekly_stats,
+    snap_counts,
+    weekly_status,
+):
+    """
+    Combine fantasy roster information and NFL data into
+    one organized record for each rostered player.
+    """
+
+    mapping_lookup = {}
+
+    for row in roster_mapping.iter_rows(named=True):
+        mapping_lookup[str(row["sleeper_id"])] = row
+
+    starters = set(roster["starters"])
+
+    player_contexts = []
+
+    for sleeper_id in roster["players"]:
+
+        sleeper_info = sleeper_players.get(sleeper_id, {})
+
+        # --------------------------------------------------
+        # Team defenses
+        # --------------------------------------------------
+
+        if not sleeper_id.isdigit():
+            player_contexts.append({
+                "sleeper_id": sleeper_id,
+                "gsis_id": None,
+                "name": f"{sleeper_id} D/ST",
+                "position": "DEF",
+                "team": sleeper_id,
+                "entity_type": "team_defense",
+                "lineup_status": (
+                    "starter"
+                    if sleeper_id in starters
+                    else "bench"
+                ),
+                "weekly_stats": [],
+                "snap_counts": [],
+                "weekly_status": [],
+            })
+
+            continue
+
+        # --------------------------------------------------
+        # Individual players
+        # --------------------------------------------------
+
+        mapping = mapping_lookup.get(sleeper_id)
+
+        if mapping:
+            gsis_id = mapping["player_id"]
+            name = mapping["name"]
+            position = mapping["position"]
+            team = mapping["team"]
+        else:
+            gsis_id = None
+            name = sleeper_info.get("full_name", sleeper_id)
+            position = sleeper_info.get("position")
+            team = sleeper_info.get("team")
+
+        # Treat Sleeper IDs as strings everywhere
+        player_stats = (
+            weekly_stats
+            .filter(
+                pl.col("sleeper_id").cast(pl.Utf8) == sleeper_id
+            )
+            .sort("week")
+            .to_dicts()
+        )
+
+        player_snaps = (
+            snap_counts
+            .filter(
+                pl.col("sleeper_id").cast(pl.Utf8) == sleeper_id
+            )
+            .sort("week")
+            .to_dicts()
+        )
+
+        player_status = (
+            weekly_status
+            .filter(
+                pl.col("sleeper_id").cast(pl.Utf8) == sleeper_id
+            )
+            .sort("week")
+            .to_dicts()
+        )
+
+        player_contexts.append({
+            "sleeper_id": sleeper_id,
+            "gsis_id": gsis_id,
+            "name": name,
+            "position": position,
+            "team": team,
+            "entity_type": "player",
+            "lineup_status": (
+                "starter"
+                if sleeper_id in starters
+                else "bench"
+            ),
+            "weekly_stats": player_stats,
+            "snap_counts": player_snaps,
+            "weekly_status": player_status,
+        })
+
+    return player_contexts
 
 def get_team_context(username, season=2026):
     """
@@ -98,6 +213,14 @@ def get_team_context(username, season=2026):
         season
     )
 
+    player_contexts = build_player_contexts(
+        roster,
+        sleeper_players,
+        roster_mapping,
+        weekly_stats,
+        snap_counts,
+        weekly_status,
+    )
 
     # --------------------------------------------------
     # Starting lineup / bench
@@ -147,4 +270,5 @@ def get_team_context(username, season=2026):
         "weekly_stats": weekly_stats,
         "snap_counts": snap_counts,
         "weekly_status": weekly_status,
+        "player_contexts": player_contexts,
     }
