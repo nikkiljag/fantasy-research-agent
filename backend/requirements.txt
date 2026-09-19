@@ -1,4 +1,7 @@
 requests
 nflreadpy
+polars
 duckdb
 pyarrow
+foundry-local-sdk-winml
+openai
