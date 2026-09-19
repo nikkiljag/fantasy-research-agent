@@ -309,3 +309,69 @@ def get_all_weekly_stats(season=2026):
             how="inner",
         )
     )
+
+def get_all_snap_counts(season=2026):
+    """
+    Load snap counts for all players and attach
+    GSIS and Sleeper identities.
+    """
+
+    snap_counts = load_snap_counts(
+        season
+    )
+
+    id_bridge = build_gsis_to_pfr_mapping()
+
+    identities = (
+        get_player_identity_table()
+        .select([
+            "player_id",
+            "sleeper_id",
+        ])
+    )
+
+    snaps_with_gsis = (
+        snap_counts
+        .join(
+            id_bridge,
+            on="pfr_player_id",
+            how="inner",
+        )
+    )
+
+    return (
+        snaps_with_gsis
+        .join(
+            identities,
+            on="player_id",
+            how="inner",
+        )
+    )
+
+
+def get_all_weekly_status(season=2026):
+    """
+    Load weekly NFL roster status for all players
+    with known Sleeper identities.
+    """
+
+    weekly_rosters = load_weekly_rosters(
+        season
+    )
+
+    identities = (
+        get_player_identity_table()
+        .select([
+            pl.col("player_id").alias("gsis_id"),
+            "sleeper_id",
+        ])
+    )
+
+    return (
+        weekly_rosters
+        .join(
+            identities,
+            on="gsis_id",
+            how="inner",
+        )
+    )

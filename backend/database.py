@@ -67,7 +67,7 @@ def save_dataframe(
 
 def save_team_data(team):
     """
-    Save datasets associated with the user's team.
+    Save datasets specific to the user's fantasy team.
     """
 
     connection = get_connection()
@@ -99,7 +99,6 @@ def save_team_data(team):
         )
 
     finally:
-
         connection.close()
 
 
@@ -121,16 +120,19 @@ def save_league_ownership(
         )
 
     finally:
-
         connection.close()
+
 
 def save_league_nfl_data(
     player_identity,
     all_weekly_stats,
+    all_snap_counts,
+    all_weekly_status,
+    player_week,
 ):
     """
-    Save league-wide NFL player identity and
-    statistical data.
+    Save league-wide NFL data and the unified
+    player-week analytics table.
     """
 
     connection = get_connection()
@@ -149,13 +151,31 @@ def save_league_nfl_data(
             all_weekly_stats,
         )
 
-    finally:
+        save_dataframe(
+            connection,
+            "all_snap_counts",
+            all_snap_counts,
+        )
 
+        save_dataframe(
+            connection,
+            "all_weekly_status",
+            all_weekly_status,
+        )
+
+        save_dataframe(
+            connection,
+            "player_week",
+            player_week,
+        )
+
+    finally:
         connection.close()
+
 
 def list_tables():
     """
-    Return all DuckDB table names.
+    Return all tables currently stored in DuckDB.
     """
 
     connection = get_connection()
@@ -172,7 +192,6 @@ def list_tables():
         ]
 
     finally:
-
         connection.close()
 
 
@@ -181,8 +200,8 @@ def query_dataframe(
     parameters=None,
 ):
     """
-    Execute a SQL query and return
-    a Polars DataFrame.
+    Execute a SQL query and return the result
+    as a Polars DataFrame.
     """
 
     connection = get_connection()
@@ -211,5 +230,4 @@ def query_dataframe(
         )
 
     finally:
-
         connection.close()

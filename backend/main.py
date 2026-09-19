@@ -7,7 +7,9 @@ from database import (
 )
 
 from nflverse import (
+    get_all_snap_counts,
     get_all_weekly_stats,
+    get_all_weekly_status,
     get_player_identity_table,
 )
 
@@ -17,6 +19,10 @@ from services.fantasy_data import (
 
 from services.league_data import (
     get_league_ownership,
+)
+
+from services.player_week import (
+    build_player_week_table,
 )
 
 
@@ -64,13 +70,13 @@ league_ownership = (
 )
 
 print(
-    f"Rostered entities found: "
+    f"Rostered entities: "
     f"{league_ownership.height}"
 )
 
 
 # ==================================================
-# LEAGUE-WIDE NFL DATA
+# NFL PLAYER IDENTITIES
 # ==================================================
 
 print(
@@ -87,8 +93,12 @@ print(
 )
 
 
+# ==================================================
+# LEAGUE-WIDE NFL DATA
+# ==================================================
+
 print(
-    "\nLoading league-wide 2026 NFL stats..."
+    "\nLoading weekly NFL stats..."
 )
 
 all_weekly_stats = (
@@ -98,13 +108,65 @@ all_weekly_stats = (
 )
 
 print(
-    f"Weekly NFL stat rows: "
+    f"Weekly stat rows: "
     f"{all_weekly_stats.height}"
 )
 
 
+print(
+    "\nLoading NFL snap counts..."
+)
+
+all_snap_counts = (
+    get_all_snap_counts(
+        season=2026
+    )
+)
+
+print(
+    f"Snap-count rows: "
+    f"{all_snap_counts.height}"
+)
+
+
+print(
+    "\nLoading weekly NFL roster status..."
+)
+
+all_weekly_status = (
+    get_all_weekly_status(
+        season=2026
+    )
+)
+
+print(
+    f"Weekly status rows: "
+    f"{all_weekly_status.height}"
+)
+
+
 # ==================================================
-# SAVE TO DUCKDB
+# UNIFIED PLAYER-WEEK TABLE
+# ==================================================
+
+print(
+    "\nBuilding unified player-week table..."
+)
+
+player_week = build_player_week_table(
+    all_weekly_stats,
+    all_snap_counts,
+    all_weekly_status,
+)
+
+print(
+    f"Player-week rows: "
+    f"{player_week.height}"
+)
+
+
+# ==================================================
+# SAVE EVERYTHING TO DUCKDB
 # ==================================================
 
 print(
@@ -122,6 +184,9 @@ save_league_ownership(
 save_league_nfl_data(
     player_identity,
     all_weekly_stats,
+    all_snap_counts,
+    all_weekly_status,
+    player_week,
 )
 
 print(
@@ -135,7 +200,7 @@ print(
 
 
 # ==================================================
-# AVAILABLE PLAYER TEST
+# USAGE-BASED WAIVER QUERY
 # ==================================================
 
 print(
@@ -143,7 +208,7 @@ print(
 )
 
 print(
-    "AVAILABLE PLAYER TEST"
+    "USAGE-BASED WAIVER TEST"
 )
 
 print(
@@ -151,56 +216,75 @@ print(
 )
 
 
-available_players = query_dataframe(
+waiver_results = query_dataframe(
     """
     SELECT
-        s.name,
-        s.position,
-        s.team,
+        pw.name,
+        pw.position,
+        pw.team,
 
         COUNT(*) AS games,
 
         ROUND(
-            AVG(s.fantasy_points_ppr),
+            AVG(
+                COALESCE(pw.targets, 0)
+                +
+                COALESCE(pw.carries, 0)
+            ),
+            2
+        ) AS avg_opportunities,
+
+        ROUND(
+            AVG(pw.offense_pct) * 100,
+            1
+        ) AS avg_snap_pct,
+
+        ROUND(
+            AVG(pw.fantasy_points_ppr),
             2
         ) AS avg_ppr,
 
-        SUM(s.targets) AS targets,
+        SUM(
+            COALESCE(pw.targets, 0)
+        ) AS total_targets,
 
-        SUM(s.carries) AS carries
+        SUM(
+            COALESCE(pw.carries, 0)
+        ) AS total_carries
 
-    FROM all_weekly_stats AS s
+    FROM player_week AS pw
 
-    LEFT JOIN league_ownership AS o
-        ON s.sleeper_id = o.sleeper_id
+    LEFT JOIN league_ownership AS own
+        ON pw.sleeper_id = own.sleeper_id
 
     WHERE
-        o.sleeper_id IS NULL
+        own.sleeper_id IS NULL
 
-        AND s.position IN (
-            'QB',
+        AND pw.position IN (
             'RB',
             'WR',
             'TE'
         )
 
     GROUP BY
-        s.sleeper_id,
-        s.name,
-        s.position,
-        s.team
+        pw.sleeper_id,
+        pw.name,
+        pw.position,
+        pw.team
 
     ORDER BY
-        avg_ppr DESC
+        avg_opportunities DESC,
+        avg_snap_pct DESC
 
     LIMIT 20
     """
 )
 
+
 print(
-    "\nTop available players by average PPR:\n"
+    "\nTop available players by usage:\n"
 )
 
 print(
-    available_players
+    waiver_results
 )
