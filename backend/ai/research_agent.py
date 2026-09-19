@@ -1,6 +1,10 @@
 import json
 import re
 
+from services.visualization import (
+    build_visualization_spec,
+)
+
 from ai.foundry_local import (
     complete_chat,
 )
@@ -315,9 +319,14 @@ def research(question):
         results,
     )
 
+    visualization = build_visualization_spec(
+    results
+)
+
     return {
-        "question": question,
-        "sql": final_sql,
-        "results": results,
-        "answer": answer,
-    }
+    "question": question,
+    "sql": final_sql,
+    "results": results,
+    "answer": answer,
+    "visualization": visualization,
+}

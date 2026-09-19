@@ -4,7 +4,7 @@ from foundry_local_sdk import (
 )
 
 
-MODEL_ALIAS = "qwen2.5-0.5b"
+MODEL_ALIAS = "qwen2.5-coder-7b"
 
 _initialized = False
 _model = None

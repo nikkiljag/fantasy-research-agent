@@ -74,6 +74,23 @@ try:
     )
 
 
+    print(
+        "\n=============================="
+    )
+
+    print(
+        "VISUALIZATION SPEC"
+    )
+
+    print(
+        "==============================\n"
+    )
+
+    print(
+        result["visualization"]
+    )
+
+
 except Exception as error:
 
     print(
