@@ -1,0 +1,31 @@
+# Secrets and environment variables
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# JavaScript / Next.js
+node_modules/
+.next/
+dist/
+build/
+
+# Local databases
+*.duckdb
+*.db
+*.sqlite
+
+# Downloaded / generated data
+data/raw/
+data/processed/
+data/cache/
+
+# Operating system / editor files
+.DS_Store
+Thumbs.db
+.idea/
