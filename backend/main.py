@@ -1,3 +1,4 @@
+from services.analytics import summarize_team
 from services.fantasy_data import get_team_context
 
 
@@ -25,25 +26,71 @@ print(
 
 print(
     f"Roster players: "
-    f"{len(team['roster']['players'])}"
+    f"{len(team['player_contexts'])}"
 )
 
-print(
-    f"Mapped NFL players: "
-    f"{team['roster_mapping'].height}"
+
+# ==================================================
+# ANALYTICS
+# ==================================================
+
+summaries = summarize_team(
+    team["player_contexts"]
 )
 
-print(
-    f"Weekly stat rows: "
-    f"{team['weekly_stats'].height}"
-)
 
-print(
-    f"Snap-count rows: "
-    f"{team['snap_counts'].height}"
-)
+print("\n==============================")
+print("PLAYER SUMMARIES")
+print("==============================")
 
-print(
-    f"Weekly status rows: "
-    f"{team['weekly_status'].height}"
-)
+for player in summaries:
+
+    print(
+        f"\n{player['name']} "
+        f"| {player['position']} "
+        f"| {player['lineup_status']}"
+    )
+
+    print(
+        f"Games with stats: "
+        f"{player['games_with_stats']}"
+    )
+
+    print(
+        f"Latest NFL status: "
+        f"{player['latest_status']} "
+        f"(Week {player['latest_status_week']})"
+    )
+
+    print(
+        f"Latest offensive snap %: "
+        f"{player['latest_offense_snap_pct']} "
+        f"(Week {player['latest_snap_week']})"
+    )
+
+    print(
+        f"Latest game with stats: "
+        f"Week {player['latest_game_week']}"
+    )
+    print(
+        f"PPR average: "
+        f"{player['fantasy']['average_ppr_points']}"
+    )
+
+    if "passing" in player:
+        print(
+            "Passing:",
+            player["passing"]
+        )
+
+    if "rushing" in player:
+        print(
+            "Rushing:",
+            player["rushing"]
+        )
+
+    if "receiving" in player:
+        print(
+            "Receiving:",
+            player["receiving"]
+        )
