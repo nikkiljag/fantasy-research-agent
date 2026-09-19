@@ -12,6 +12,10 @@ except ValueError as error:
     raise SystemExit
 
 
+# ==================================================
+# TEAM OVERVIEW
+# ==================================================
+
 print("\n==============================")
 print("TEAM CONTEXT LOADED")
 print("==============================")
@@ -31,7 +35,7 @@ print(
 
 
 # ==================================================
-# ANALYTICS
+# PLAYER ANALYTICS
 # ==================================================
 
 summaries = summarize_team(
@@ -57,6 +61,11 @@ for player in summaries:
     )
 
     print(
+        f"Latest game with stats: "
+        f"Week {player['latest_game_week']}"
+    )
+
+    print(
         f"Latest NFL status: "
         f"{player['latest_status']} "
         f"(Week {player['latest_status_week']})"
@@ -68,10 +77,6 @@ for player in summaries:
         f"(Week {player['latest_snap_week']})"
     )
 
-    print(
-        f"Latest game with stats: "
-        f"Week {player['latest_game_week']}"
-    )
     print(
         f"PPR average: "
         f"{player['fantasy']['average_ppr_points']}"
@@ -93,4 +98,25 @@ for player in summaries:
         print(
             "Receiving:",
             player["receiving"]
+        )
+
+
+# ==================================================
+# CHART DATA TEST
+# ==================================================
+
+print("\n==============================")
+print("CHART DATA TEST")
+print("==============================")
+
+for player in summaries:
+
+    if player["name"] == "Amon-Ra St. Brown":
+
+        print(
+            "\nAmon-Ra St. Brown:"
+        )
+
+        print(
+            player["series"]
         )

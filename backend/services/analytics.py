@@ -3,7 +3,7 @@ def safe_sum(rows, field):
     Sum a numeric field across weekly rows.
 
     Returns None when there are no statistical rows,
-    so 'no data' is not confused with a real zero.
+    so missing data is not confused with a real zero.
     """
 
     if not rows:
@@ -290,6 +290,81 @@ def summarize_player(player):
         summary["defense"] = {
             "status": "team-level stats not integrated yet"
         }
+
+    # ==================================================
+    # CHART / TREND DATA
+    # ==================================================
+
+    summary["series"] = {
+        "fantasy_points_ppr": [
+            {
+                "week": row.get("week"),
+                "value": row.get("fantasy_points_ppr"),
+            }
+            for row in stats
+            if row.get("fantasy_points_ppr") is not None
+        ],
+
+        "snap_pct": [
+            {
+                "week": row.get("week"),
+                "value": row.get("offense_pct"),
+            }
+            for row in snaps
+            if row.get("offense_pct") is not None
+        ],
+    }
+
+    if position == "RB":
+
+        summary["series"]["carries"] = [
+            {
+                "week": row.get("week"),
+                "value": row.get("carries"),
+            }
+            for row in stats
+            if row.get("carries") is not None
+        ]
+
+        summary["series"]["targets"] = [
+            {
+                "week": row.get("week"),
+                "value": row.get("targets"),
+            }
+            for row in stats
+            if row.get("targets") is not None
+        ]
+
+    elif position in ("WR", "TE"):
+
+        summary["series"]["targets"] = [
+            {
+                "week": row.get("week"),
+                "value": row.get("targets"),
+            }
+            for row in stats
+            if row.get("targets") is not None
+        ]
+
+        summary["series"]["air_yards"] = [
+            {
+                "week": row.get("week"),
+                "value": row.get("receiving_air_yards"),
+            }
+            for row in stats
+            if row.get("receiving_air_yards") is not None
+        ]
+
+    elif position == "QB":
+
+        summary["series"]["pass_attempts"] = [
+            {
+                "week": row.get("week"),
+                "value": row.get("attempts"),
+            }
+            for row in stats
+            if row.get("attempts") is not None
+        ]
 
     return summary
 
