@@ -1,26 +1,73 @@
+from database import (
+    list_tables,
+    save_team_data,
+)
+
 from services.analytics import summarize_team
 from services.fantasy_data import get_team_context
 
 
-username = input("Enter your Sleeper username: ")
+username = input(
+    "Enter your Sleeper username: "
+)
 
 try:
-    team = get_team_context(username)
+
+    team = get_team_context(
+        username
+    )
 
 except ValueError as error:
-    print(f"\nError: {error}")
+
+    print(
+        f"\nError: {error}"
+    )
+
     raise SystemExit
+
+
+# ==================================================
+# SAVE DATA TO DUCKDB
+# ==================================================
+
+print(
+    "\nSaving team data to DuckDB..."
+)
+
+save_team_data(
+    team
+)
+
+print(
+    "Database updated successfully."
+)
+
+print(
+    "Database tables:",
+    list_tables(),
+)
 
 
 # ==================================================
 # TEAM OVERVIEW
 # ==================================================
 
-print("\n==============================")
-print("TEAM CONTEXT LOADED")
-print("==============================")
+print(
+    "\n=============================="
+)
 
-print(f"\nLeague: {team['league']['name']}")
+print(
+    "TEAM CONTEXT LOADED"
+)
+
+print(
+    "=============================="
+)
+
+print(
+    f"\nLeague: "
+    f"{team['league']['name']}"
+)
 
 print(
     f"Record: "
@@ -43,9 +90,18 @@ summaries = summarize_team(
 )
 
 
-print("\n==============================")
-print("PLAYER SUMMARIES")
-print("==============================")
+print(
+    "\n=============================="
+)
+
+print(
+    "PLAYER SUMMARIES"
+)
+
+print(
+    "=============================="
+)
+
 
 for player in summaries:
 
@@ -68,13 +124,15 @@ for player in summaries:
     print(
         f"Latest NFL status: "
         f"{player['latest_status']} "
-        f"(Week {player['latest_status_week']})"
+        f"(Week "
+        f"{player['latest_status_week']})"
     )
 
     print(
         f"Latest offensive snap %: "
         f"{player['latest_offense_snap_pct']} "
-        f"(Week {player['latest_snap_week']})"
+        f"(Week "
+        f"{player['latest_snap_week']})"
     )
 
     print(
@@ -83,21 +141,24 @@ for player in summaries:
     )
 
     if "passing" in player:
+
         print(
             "Passing:",
-            player["passing"]
+            player["passing"],
         )
 
     if "rushing" in player:
+
         print(
             "Rushing:",
-            player["rushing"]
+            player["rushing"],
         )
 
     if "receiving" in player:
+
         print(
             "Receiving:",
-            player["receiving"]
+            player["receiving"],
         )
 
 
@@ -105,13 +166,25 @@ for player in summaries:
 # CHART DATA TEST
 # ==================================================
 
-print("\n==============================")
-print("CHART DATA TEST")
-print("==============================")
+print(
+    "\n=============================="
+)
+
+print(
+    "CHART DATA TEST"
+)
+
+print(
+    "=============================="
+)
+
 
 for player in summaries:
 
-    if player["name"] == "Amon-Ra St. Brown":
+    if (
+        player["name"]
+        == "Amon-Ra St. Brown"
+    ):
 
         print(
             "\nAmon-Ra St. Brown:"
