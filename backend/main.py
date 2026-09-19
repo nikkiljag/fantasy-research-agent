@@ -1,16 +1,27 @@
 from database import (
     list_tables,
     query_dataframe,
+    save_league_ownership,
     save_team_data,
 )
 
-from services.analytics import summarize_team
-from services.fantasy_data import get_team_context
+from services.fantasy_data import (
+    get_team_context,
+)
+
+from services.league_data import (
+    get_league_ownership,
+)
 
 
 username = input(
     "Enter your Sleeper username: "
 )
+
+
+# ==================================================
+# USER TEAM
+# ==================================================
 
 try:
 
@@ -27,16 +38,45 @@ except ValueError as error:
     raise SystemExit
 
 
+league_id = (
+    team["league"]["league_id"]
+)
+
+
 # ==================================================
-# SAVE DATA TO DUCKDB
+# LEAGUE-WIDE OWNERSHIP
 # ==================================================
 
 print(
-    "\nSaving team data to DuckDB..."
+    "\nLoading entire league ownership..."
+)
+
+league_ownership = (
+    get_league_ownership(
+        league_id
+    )
+)
+
+print(
+    f"Rostered entities found: "
+    f"{league_ownership.height}"
+)
+
+
+# ==================================================
+# SAVE TO DUCKDB
+# ==================================================
+
+print(
+    "\nSaving data to DuckDB..."
 )
 
 save_team_data(
     team
+)
+
+save_league_ownership(
+    league_ownership
 )
 
 print(
@@ -48,39 +88,9 @@ print(
     list_tables(),
 )
 
-# ==================================================
-# DATABASE QUERY TEST
-# ==================================================
-
-print("\n==============================")
-print("DATABASE QUERY TEST")
-print("==============================")
-
-query = """
-SELECT
-    name,
-    position,
-    COUNT(*) AS games,
-    ROUND(
-        AVG(fantasy_points_ppr),
-        2
-    ) AS avg_ppr,
-    SUM(targets) AS targets,
-    SUM(carries) AS carries
-FROM weekly_stats
-GROUP BY
-    name,
-    position
-ORDER BY
-    avg_ppr DESC
-"""
-
-results = query_dataframe(query)
-
-print(results)
 
 # ==================================================
-# TEAM OVERVIEW
+# LEAGUE SUMMARY
 # ==================================================
 
 print(
@@ -88,7 +98,7 @@ print(
 )
 
 print(
-    "TEAM CONTEXT LOADED"
+    "LEAGUE SUMMARY"
 )
 
 print(
@@ -101,126 +111,46 @@ print(
 )
 
 print(
-    f"Record: "
+    f"Teams: "
+    f"{team['league']['total_rosters']}"
+)
+
+print(
+    f"Your record: "
     f"{team['roster']['wins']}-"
     f"{team['roster']['losses']}"
 )
 
-print(
-    f"Roster players: "
-    f"{len(team['player_contexts'])}"
-)
-
 
 # ==================================================
-# PLAYER ANALYTICS
+# OWNERSHIP DATABASE TEST
 # ==================================================
 
-summaries = summarize_team(
-    team["player_contexts"]
-)
-
-
-print(
-    "\n=============================="
-)
-
-print(
-    "PLAYER SUMMARIES"
-)
-
-print(
-    "=============================="
-)
-
-
-for player in summaries:
-
-    print(
-        f"\n{player['name']} "
-        f"| {player['position']} "
-        f"| {player['lineup_status']}"
-    )
-
-    print(
-        f"Games with stats: "
-        f"{player['games_with_stats']}"
-    )
-
-    print(
-        f"Latest game with stats: "
-        f"Week {player['latest_game_week']}"
-    )
-
-    print(
-        f"Latest NFL status: "
-        f"{player['latest_status']} "
-        f"(Week "
-        f"{player['latest_status_week']})"
-    )
-
-    print(
-        f"Latest offensive snap %: "
-        f"{player['latest_offense_snap_pct']} "
-        f"(Week "
-        f"{player['latest_snap_week']})"
-    )
-
-    print(
-        f"PPR average: "
-        f"{player['fantasy']['average_ppr_points']}"
-    )
-
-    if "passing" in player:
-
-        print(
-            "Passing:",
-            player["passing"],
-        )
-
-    if "rushing" in player:
-
-        print(
-            "Rushing:",
-            player["rushing"],
-        )
-
-    if "receiving" in player:
-
-        print(
-            "Receiving:",
-            player["receiving"],
-        )
-
-
-# ==================================================
-# CHART DATA TEST
-# ==================================================
-
-print(
-    "\n=============================="
+ownership_summary = query_dataframe(
+    """
+    SELECT
+        roster_id,
+        fantasy_team_name,
+        manager_display_name,
+        wins,
+        losses,
+        COUNT(*) AS roster_size
+    FROM league_ownership
+    GROUP BY
+        roster_id,
+        fantasy_team_name,
+        manager_display_name,
+        wins,
+        losses
+    ORDER BY
+        roster_id
+    """
 )
 
 print(
-    "CHART DATA TEST"
+    "\nLeague teams stored in DuckDB:\n"
 )
 
 print(
-    "=============================="
+    ownership_summary
 )
-
-
-for player in summaries:
-
-    if (
-        player["name"]
-        == "Amon-Ra St. Brown"
-    ):
-
-        print(
-            "\nAmon-Ra St. Brown:"
-        )
-
-        print(
-            player["series"]
-        )

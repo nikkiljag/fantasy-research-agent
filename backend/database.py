@@ -6,13 +6,21 @@ import polars as pl
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-DATABASE_DIR = PROJECT_ROOT / "data" / "database"
-DATABASE_FILE = DATABASE_DIR / "fantasy.duckdb"
+DATABASE_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "database"
+)
+
+DATABASE_FILE = (
+    DATABASE_DIR
+    / "fantasy.duckdb"
+)
 
 
 def get_connection():
     """
-    Open a connection to the local DuckDB database.
+    Open the local DuckDB database.
     """
 
     DATABASE_DIR.mkdir(
@@ -32,12 +40,11 @@ def save_dataframe(
 ):
     """
     Save a Polars DataFrame into DuckDB.
-
-    The table is replaced each time so local data
-    stays synchronized with the latest source data.
     """
 
-    temporary_name = f"temp_{table_name}"
+    temporary_name = (
+        f"temp_{table_name}"
+    )
 
     connection.register(
         temporary_name,
@@ -60,8 +67,7 @@ def save_dataframe(
 
 def save_team_data(team):
     """
-    Save the main structured team datasets
-    into DuckDB.
+    Save datasets associated with the user's team.
     """
 
     connection = get_connection()
@@ -93,12 +99,35 @@ def save_team_data(team):
         )
 
     finally:
+
+        connection.close()
+
+
+def save_league_ownership(
+    league_ownership,
+):
+    """
+    Save league-wide fantasy ownership data.
+    """
+
+    connection = get_connection()
+
+    try:
+
+        save_dataframe(
+            connection,
+            "league_ownership",
+            league_ownership,
+        )
+
+    finally:
+
         connection.close()
 
 
 def list_tables():
     """
-    Return all tables currently stored in DuckDB.
+    Return all DuckDB table names.
     """
 
     connection = get_connection()
@@ -115,13 +144,17 @@ def list_tables():
         ]
 
     finally:
+
         connection.close()
 
 
-def query_dataframe(sql, parameters=None):
+def query_dataframe(
+    sql,
+    parameters=None,
+):
     """
-    Run a read query against DuckDB and return
-    the result as a Polars DataFrame.
+    Execute a SQL query and return
+    a Polars DataFrame.
     """
 
     connection = get_connection()
@@ -129,12 +162,17 @@ def query_dataframe(sql, parameters=None):
     try:
 
         if parameters:
+
             result = connection.execute(
                 sql,
                 parameters,
             )
+
         else:
-            result = connection.execute(sql)
+
+            result = connection.execute(
+                sql
+            )
 
         arrow_table = (
             result.fetch_arrow_table()
@@ -145,4 +183,5 @@ def query_dataframe(sql, parameters=None):
         )
 
     finally:
+
         connection.close()
