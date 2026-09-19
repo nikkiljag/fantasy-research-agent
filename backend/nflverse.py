@@ -255,3 +255,57 @@ def get_roster_weekly_status(
             how="inner",
         )
     )
+
+def get_player_identity_table():
+    """
+    Build a clean identity table connecting
+    nflverse GSIS IDs to Sleeper IDs.
+    """
+
+    player_ids = load_player_id_map()
+
+    return (
+        player_ids
+        .filter(
+            pl.col("gsis_id").is_not_null()
+            & pl.col("sleeper_id").is_not_null()
+        )
+        .select([
+            pl.col("gsis_id").alias("player_id"),
+
+            pl.col("sleeper_id")
+            .cast(pl.Utf8)
+            .alias("sleeper_id"),
+
+            "name",
+            "position",
+            "team",
+        ])
+        .unique(
+            subset=["player_id"]
+        )
+    )
+
+
+def get_all_weekly_stats(season=2026):
+    """
+    Load weekly NFL stats for all players
+    and attach Sleeper IDs.
+    """
+
+    stats = load_weekly_stats(
+        season
+    )
+
+    identities = (
+        get_player_identity_table()
+    )
+
+    return (
+        stats
+        .join(
+            identities,
+            on="player_id",
+            how="inner",
+        )
+    )

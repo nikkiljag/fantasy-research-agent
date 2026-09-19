@@ -1,8 +1,14 @@
 from database import (
     list_tables,
     query_dataframe,
+    save_league_nfl_data,
     save_league_ownership,
     save_team_data,
+)
+
+from nflverse import (
+    get_all_weekly_stats,
+    get_player_identity_table,
 )
 
 from services.fantasy_data import (
@@ -44,11 +50,11 @@ league_id = (
 
 
 # ==================================================
-# LEAGUE-WIDE OWNERSHIP
+# LEAGUE OWNERSHIP
 # ==================================================
 
 print(
-    "\nLoading entire league ownership..."
+    "\nLoading league ownership..."
 )
 
 league_ownership = (
@@ -60,6 +66,40 @@ league_ownership = (
 print(
     f"Rostered entities found: "
     f"{league_ownership.height}"
+)
+
+
+# ==================================================
+# LEAGUE-WIDE NFL DATA
+# ==================================================
+
+print(
+    "\nLoading NFL player identities..."
+)
+
+player_identity = (
+    get_player_identity_table()
+)
+
+print(
+    f"Mapped NFL players: "
+    f"{player_identity.height}"
+)
+
+
+print(
+    "\nLoading league-wide 2026 NFL stats..."
+)
+
+all_weekly_stats = (
+    get_all_weekly_stats(
+        season=2026
+    )
+)
+
+print(
+    f"Weekly NFL stat rows: "
+    f"{all_weekly_stats.height}"
 )
 
 
@@ -79,6 +119,11 @@ save_league_ownership(
     league_ownership
 )
 
+save_league_nfl_data(
+    player_identity,
+    all_weekly_stats,
+)
+
 print(
     "Database updated successfully."
 )
@@ -90,7 +135,7 @@ print(
 
 
 # ==================================================
-# LEAGUE SUMMARY
+# AVAILABLE PLAYER TEST
 # ==================================================
 
 print(
@@ -98,59 +143,64 @@ print(
 )
 
 print(
-    "LEAGUE SUMMARY"
+    "AVAILABLE PLAYER TEST"
 )
 
 print(
     "=============================="
 )
 
-print(
-    f"\nLeague: "
-    f"{team['league']['name']}"
-)
 
-print(
-    f"Teams: "
-    f"{team['league']['total_rosters']}"
-)
-
-print(
-    f"Your record: "
-    f"{team['roster']['wins']}-"
-    f"{team['roster']['losses']}"
-)
-
-
-# ==================================================
-# OWNERSHIP DATABASE TEST
-# ==================================================
-
-ownership_summary = query_dataframe(
+available_players = query_dataframe(
     """
     SELECT
-        roster_id,
-        fantasy_team_name,
-        manager_display_name,
-        wins,
-        losses,
-        COUNT(*) AS roster_size
-    FROM league_ownership
+        s.name,
+        s.position,
+        s.team,
+
+        COUNT(*) AS games,
+
+        ROUND(
+            AVG(s.fantasy_points_ppr),
+            2
+        ) AS avg_ppr,
+
+        SUM(s.targets) AS targets,
+
+        SUM(s.carries) AS carries
+
+    FROM all_weekly_stats AS s
+
+    LEFT JOIN league_ownership AS o
+        ON s.sleeper_id = o.sleeper_id
+
+    WHERE
+        o.sleeper_id IS NULL
+
+        AND s.position IN (
+            'QB',
+            'RB',
+            'WR',
+            'TE'
+        )
+
     GROUP BY
-        roster_id,
-        fantasy_team_name,
-        manager_display_name,
-        wins,
-        losses
+        s.sleeper_id,
+        s.name,
+        s.position,
+        s.team
+
     ORDER BY
-        roster_id
+        avg_ppr DESC
+
+    LIMIT 20
     """
 )
 
 print(
-    "\nLeague teams stored in DuckDB:\n"
+    "\nTop available players by average PPR:\n"
 )
 
 print(
-    ownership_summary
+    available_players
 )

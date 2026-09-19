@@ -124,6 +124,34 @@ def save_league_ownership(
 
         connection.close()
 
+def save_league_nfl_data(
+    player_identity,
+    all_weekly_stats,
+):
+    """
+    Save league-wide NFL player identity and
+    statistical data.
+    """
+
+    connection = get_connection()
+
+    try:
+
+        save_dataframe(
+            connection,
+            "player_identity",
+            player_identity,
+        )
+
+        save_dataframe(
+            connection,
+            "all_weekly_stats",
+            all_weekly_stats,
+        )
+
+    finally:
+
+        connection.close()
 
 def list_tables():
     """
