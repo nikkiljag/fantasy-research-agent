@@ -2,25 +2,32 @@
 
 ## Current Phase
 
-Project setup and repository initialization.
+Sleeper data integration.
 
 ## Completed
 
-* Defined the Fantasy Research Agent concept.
-* Selected Sleeper as the initial fantasy league data source.
-* Selected nflverse as the initial NFL statistics source.
-* Planned Microsoft Foundry Local for initial AI development.
-* Planned evidence-based answers using charts, tables, graphs, and statistics.
-* Planned future user accounts and team dashboards.
-* Created the initial project folder structure.
-* Initialized Git.
-* Created the initial documentation files.
-* Created the `.gitignore` file.
+* Created local Git repository.
+* Connected repository to GitHub.
+* Created Python virtual environment.
+* Added Python dependency management.
+* Connected successfully to the Sleeper API.
+* Retrieved a Sleeper user by username.
+* Retrieved the user's 2026 leagues.
+* Identified the user's roster inside a league.
+* Retrieved Sleeper's NFL player database.
+* Added local player-data caching.
+* Converted roster player IDs into names, positions, and NFL teams.
 
-## Current Task
+## Current Working Flow
 
-Finish the initial repository setup and make the first Git commit.
+Sleeper username → user ID → league → roster → player IDs → player information
+
+## Current Test League
+
+Outside huzz
+14 teams
+2026 season
 
 ## Next Milestone
 
-Connect to the Sleeper API with a very small Python script and retrieve a user's fantasy leagues.
+Retrieve league scoring settings and separate the user's starting lineup from bench players.
