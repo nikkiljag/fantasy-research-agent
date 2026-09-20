@@ -17,13 +17,18 @@ from ai.foundry_local import (
 )
 
 from services.player_tools import (
-    find_available_players,
+    search_players,
 )
 
 
-AVAILABLE_PLAYERS_SCHEMA = {
+# ============================================================
+# TOOL SCHEMA
+# ============================================================
+
+SEARCH_PLAYERS_SCHEMA = {
     "type": "object",
     "properties": {
+
         "position": {
             "type": "string",
             "enum": [
@@ -33,25 +38,43 @@ AVAILABLE_PLAYERS_SCHEMA = {
                 "TE",
             ],
             "description": (
-                "Fantasy football position to search."
+                "Fantasy football position to research."
+            ),
+        },
+
+        "availability": {
+            "type": "string",
+            "enum": [
+                "unrostered",
+                "rostered",
+                "all",
+            ],
+            "description": (
+                "Player ownership status. "
+                "IMPORTANT: available players, waiver players, "
+                "free agents, and unrostered players all mean "
+                "'unrostered'."
             ),
         },
 
         "sort_by": {
-            "type": "string",
-            "enum": [
-                "avg_carries",
-                "avg_targets",
-                "avg_opportunities",
-                "avg_snap_pct",
-                "avg_ppr",
-            ],
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": [
+                    "avg_carries",
+                    "avg_targets",
+                    "avg_opportunities",
+                    "avg_snap_pct",
+                    "avg_ppr",
+                ],
+            },
+            "minItems": 1,
+            "maxItems": 3,
             "description": (
-                "Metric used to rank players. "
-                "For running backs emphasizing carries "
-                "and snap share, avg_carries is useful "
-                "because the returned table also contains "
-                "avg_snap_pct."
+                "Metrics used to rank players in priority order. "
+                "The first metric is primary, followed by "
+                "secondary tie-breaking metrics."
             ),
         },
 
@@ -67,29 +90,165 @@ AVAILABLE_PLAYERS_SCHEMA = {
 
     "required": [
         "position",
+        "availability",
+        "sort_by",
     ],
 }
 
 
+# ============================================================
+# AGENT INSTRUCTIONS
+# ============================================================
+
 SYSTEM_PROMPT = """
 You are a fantasy football research agent.
 
-You have access to deterministic analytical tools backed
-by the user's real fantasy league and NFL statistics.
+You have access to deterministic analytics backed by
+the user's actual fantasy league and NFL statistics.
 
-RULES:
+Use search_players for player research.
 
-- Use the provided research tool to answer the question.
-- Do not guess which players are available.
+OWNERSHIP TERMINOLOGY:
+
+- "available" means unrostered
+- "waiver" or "waiver wire" means unrostered
+- "free agent" means unrostered
+- "unowned" means unrostered
+- "unrostered" means unrostered
+- "rostered" or "owned" means rostered
+
+Never call rostered players available.
+
+DATA RULES:
+
+- Do not guess ownership.
 - Do not invent statistics.
-- Do not invent injuries, news, matchups, or league data.
-- Base your conclusions only on information returned
-  by the tool.
-- Explain the most relevant numbers clearly.
-- For running backs, carries, targets, opportunities,
-  snap share, and fantasy production can all be useful.
+- Do not invent injuries, news, matchups, or depth-chart changes.
+- Base conclusions only on tool evidence.
+- Describe players relative to the requested metrics rather than
+  claiming they are universally the best.
+
+METRIC GUIDANCE:
+
+RB:
+- avg_carries = rushing workload
+- avg_targets = receiving involvement
+- avg_opportunities = carries + targets
+- avg_snap_pct = percentage of offensive snaps played
+- avg_ppr = fantasy production
+
+WR / TE:
+- avg_targets is generally highly relevant
+- avg_snap_pct gives participation context
+- avg_ppr measures realized fantasy production
+
+QB:
+- Current generic metrics are limited for quarterback analysis.
+
+SORTING:
+
+sort_by is ordered by priority.
+
+Example:
+
+["avg_targets", "avg_snap_pct"]
+
+means primarily rank by targets, then by snap share.
 """
 
+
+# ============================================================
+# ARGUMENT GUARDRAILS
+# ============================================================
+
+def normalize_search_arguments(
+    question,
+    arguments,
+):
+    """
+    Validate and correct important semantic constraints.
+
+    The LLM proposes arguments, but deterministic Python
+    has final authority over meanings such as "available".
+    """
+
+    normalized = dict(
+        arguments
+    )
+
+    question_lower = (
+        question
+        .lower()
+    )
+
+
+    # --------------------------------------------------------
+    # AVAILABILITY
+    # --------------------------------------------------------
+
+    unrostered_phrases = [
+        "available",
+        "waiver",
+        "free agent",
+        "free-agent",
+        "unrostered",
+        "unowned",
+        "not rostered",
+    ]
+
+    rostered_phrases = [
+        "rostered players",
+        "owned players",
+    ]
+
+
+    if any(
+        phrase in question_lower
+        for phrase in unrostered_phrases
+    ):
+
+        normalized[
+            "availability"
+        ] = "unrostered"
+
+    elif any(
+        phrase in question_lower
+        for phrase in rostered_phrases
+    ):
+
+        normalized[
+            "availability"
+        ] = "rostered"
+
+
+    # --------------------------------------------------------
+    # DEFAULTS
+    # --------------------------------------------------------
+
+    normalized.setdefault(
+        "availability",
+        "all",
+    )
+
+    normalized.setdefault(
+        "sort_by",
+        [
+            "avg_opportunities"
+        ],
+    )
+
+    normalized.setdefault(
+        "limit",
+        10,
+    )
+
+
+    return normalized
+
+
+# ============================================================
+# TOOL EXECUTION
+# ============================================================
 
 def execute_tool(
     function_name,
@@ -99,14 +258,23 @@ def execute_tool(
     Execute an approved fantasy research tool.
     """
 
-    if function_name == "find_available_players":
+    if function_name == "search_players":
 
-        results = find_available_players(
-            position=arguments["position"],
+        results = search_players(
+            position=arguments.get(
+                "position"
+            ),
+
+            availability=arguments.get(
+                "availability",
+                "all",
+            ),
 
             sort_by=arguments.get(
                 "sort_by",
-                "avg_opportunities",
+                [
+                    "avg_opportunities"
+                ],
             ),
 
             limit=arguments.get(
@@ -124,10 +292,14 @@ def execute_tool(
     )
 
 
+# ============================================================
+# RESPONSE READER
+# ============================================================
+
 def read_response(response):
     """
-    Extract normal text and structured tool calls
-    from a Foundry Local response.
+    Extract text and structured tool calls from
+    a Foundry Local response.
     """
 
     text_parts = []
@@ -172,24 +344,20 @@ def read_response(response):
                     )
 
     return (
-        "".join(text_parts).strip(),
+        "".join(
+            text_parts
+        ).strip(),
         tool_calls,
     )
 
 
+# ============================================================
+# AGENT
+# ============================================================
+
 def run_tool_agent(question):
     """
-    Run one deterministic fantasy research cycle.
-
-    Step 1:
-        Force Foundry to make a structured tool call.
-
-    Step 2:
-        Execute the Python analytics tool.
-
-    Step 3:
-        Disable further tool calls and ask Foundry
-        to explain the returned evidence.
+    Run a generic fantasy-player research cycle.
     """
 
     model = get_model()
@@ -200,35 +368,35 @@ def run_tool_agent(question):
         model
     ) as session:
 
-        # ------------------------------------------
+        # ----------------------------------------------------
         # REGISTER TOOL
-        # ------------------------------------------
+        # ----------------------------------------------------
 
         session.add_tool_definition(
-            name="find_available_players",
+            name="search_players",
 
             description=(
-                "Find players who are currently "
-                "unrostered in the user's fantasy "
-                "football league and return their "
-                "NFL usage and fantasy statistics."
+                "Search fantasy football players using "
+                "NFL statistics and actual league ownership. "
+                "Available, waiver, free-agent, and unrostered "
+                "player searches must use availability='unrostered'."
             ),
 
             json_schema=json.dumps(
-                AVAILABLE_PLAYERS_SCHEMA
+                SEARCH_PLAYERS_SCHEMA
             ),
         )
 
 
-        # ------------------------------------------
-        # FORCE STRUCTURED TOOL CALL
-        # ------------------------------------------
+        # ----------------------------------------------------
+        # ASK FOUNDRY TO PLAN TOOL CALL
+        # ----------------------------------------------------
 
         session.set_options(
             RequestOptions(
                 search=SearchOptions(
                     temperature=0.0,
-                    max_output_tokens=300,
+                    max_output_tokens=350,
                 ),
 
                 tool_choice=(
@@ -267,15 +435,14 @@ def run_tool_agent(question):
         if not tool_calls:
 
             raise RuntimeError(
-                "Foundry did not return a structured "
-                "tool call even though tool calling "
-                "was required."
+                "Foundry did not return a "
+                "structured tool call."
             )
 
 
-        # ------------------------------------------
-        # EXECUTE TOOL CALLS
-        # ------------------------------------------
+        # ----------------------------------------------------
+        # EXECUTE TOOL
+        # ----------------------------------------------------
 
         with Request() as follow_up:
 
@@ -285,12 +452,38 @@ def run_tool_agent(question):
                     tool_call["name"]
                 )
 
-                arguments = json.loads(
-                    tool_call["arguments"]
+                proposed_arguments = (
+                    json.loads(
+                        tool_call[
+                            "arguments"
+                        ]
+                    )
+                )
+
+
+                print(
+                    "\nFoundry proposed arguments:"
                 )
 
                 print(
-                    "\nFoundry requested tool: "
+                    proposed_arguments
+                )
+
+
+                # Python validates/corrects semantic constraints.
+                arguments = (
+                    normalize_search_arguments(
+                        question,
+                        proposed_arguments,
+                    )
+                )
+
+
+                print(
+                    "\nValidated tool call:"
+                )
+
+                print(
                     f"{function_name}"
                 )
 
@@ -313,27 +506,24 @@ def run_tool_agent(question):
 
 
                 follow_up.add_item(
-    ToolResultItem(
-        call_id=(
-            tool_call[
-                "call_id"
-            ]
-        ),
+                    ToolResultItem(
+                        call_id=(
+                            tool_call[
+                                "call_id"
+                            ]
+                        ),
 
-        result=json.dumps(
-            result,
-            default=str,
-        ),
-    )
-)
+                        result=json.dumps(
+                            result,
+                            default=str,
+                        ),
+                    )
+                )
 
 
-            # --------------------------------------
-            # TOOL IS DONE
-            #
-            # Force the next turn to be normal text
-            # instead of another function call.
-            # --------------------------------------
+            # ------------------------------------------------
+            # FINAL NATURAL-LANGUAGE ANSWER
+            # ------------------------------------------------
 
             session.set_options(
                 RequestOptions(
@@ -361,15 +551,9 @@ def run_tool_agent(question):
                 )
 
 
-        if extra_tool_calls:
-
-            raise RuntimeError(
-                "Foundry attempted another tool call "
-                "after tool calling was disabled."
-            )
-
-
         return {
             "answer": answer_text,
-            "tool_history": tool_history,
+            "tool_history": (
+                tool_history
+            ),
         }

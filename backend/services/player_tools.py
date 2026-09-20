@@ -1,6 +1,10 @@
 from database import query_dataframe
 
 
+# ============================================================
+# ALLOWED INPUTS
+# ============================================================
+
 ALLOWED_POSITIONS = {
     "QB",
     "RB",
@@ -9,6 +13,18 @@ ALLOWED_POSITIONS = {
 }
 
 
+ALLOWED_AVAILABILITY = {
+    "unrostered",
+    "rostered",
+    "all",
+}
+
+
+# These are logical analytics metrics that the agent is
+# allowed to request for sorting.
+#
+# The important idea is that the AI chooses from these
+# reusable concepts instead of writing arbitrary SQL.
 ALLOWED_SORT_METRICS = {
     "avg_carries",
     "avg_targets",
@@ -18,35 +34,175 @@ ALLOWED_SORT_METRICS = {
 }
 
 
-def find_available_players(
-    position,
-    sort_by="avg_opportunities",
+# ============================================================
+# GENERIC PLAYER SEARCH
+# ============================================================
+
+def search_players(
+    position=None,
+    availability="all",
+    sort_by=None,
     limit=10,
 ):
     """
-    Find unrostered fantasy players using
-    league ownership and NFL usage data.
+    Generic fantasy-football player research tool.
 
-    This is a deterministic analytics tool
-    intended for use by the AI research agent.
+    The AI can control:
+    - position
+    - ownership/availability
+    - ranking metrics
+    - result count
+
+    Multiple sort metrics may be supplied.
+
+    Example:
+
+        search_players(
+            position="RB",
+            availability="unrostered",
+            sort_by=[
+                "avg_carries",
+                "avg_snap_pct",
+            ],
+            limit=10,
+        )
+
+    This ranks primarily by carries and then uses
+    snap share as the secondary ranking criterion.
     """
 
-    position = position.upper()
+    # --------------------------------------------------------
+    # VALIDATE POSITION
+    # --------------------------------------------------------
 
-    if position not in ALLOWED_POSITIONS:
+    if position is not None:
+
+        position = position.upper()
+
+        if position not in ALLOWED_POSITIONS:
+
+            raise ValueError(
+                f"Unsupported position: {position}"
+            )
+
+
+    # --------------------------------------------------------
+    # VALIDATE AVAILABILITY
+    # --------------------------------------------------------
+
+    availability = availability.lower()
+
+    if availability not in ALLOWED_AVAILABILITY:
+
         raise ValueError(
-            f"Unsupported position: {position}"
+            f"Unsupported availability: "
+            f"{availability}"
         )
 
-    if sort_by not in ALLOWED_SORT_METRICS:
-        raise ValueError(
-            f"Unsupported sort metric: {sort_by}"
-        )
+
+    # --------------------------------------------------------
+    # VALIDATE SORT METRICS
+    # --------------------------------------------------------
+
+    if sort_by is None:
+
+        sort_by = [
+            "avg_opportunities"
+        ]
+
+    elif isinstance(
+        sort_by,
+        str,
+    ):
+
+        sort_by = [
+            sort_by
+        ]
+
+
+    for metric in sort_by:
+
+        if metric not in ALLOWED_SORT_METRICS:
+
+            raise ValueError(
+                f"Unsupported sort metric: "
+                f"{metric}"
+            )
+
+
+    # --------------------------------------------------------
+    # VALIDATE LIMIT
+    # --------------------------------------------------------
 
     limit = max(
         1,
-        min(int(limit), 50),
+        min(
+            int(limit),
+            50,
+        ),
     )
+
+
+    # --------------------------------------------------------
+    # BUILD FILTERS
+    # --------------------------------------------------------
+
+    where_conditions = []
+
+    parameters = []
+
+
+    if position is not None:
+
+        where_conditions.append(
+            "pw.position = ?"
+        )
+
+        parameters.append(
+            position
+        )
+
+
+    if availability == "unrostered":
+
+        where_conditions.append(
+            "own.sleeper_id IS NULL"
+        )
+
+    elif availability == "rostered":
+
+        where_conditions.append(
+            "own.sleeper_id IS NOT NULL"
+        )
+
+
+    if where_conditions:
+
+        where_sql = (
+            "WHERE "
+            + " AND ".join(
+                where_conditions
+            )
+        )
+
+    else:
+
+        where_sql = ""
+
+
+    # --------------------------------------------------------
+    # BUILD SAFE ORDER BY
+    # --------------------------------------------------------
+
+    order_sql = ", ".join(
+        f"{metric} DESC"
+        for metric in sort_by
+    )
+
+
+    # --------------------------------------------------------
+    # QUERY
+    # --------------------------------------------------------
 
     sql = f"""
     SELECT
@@ -111,10 +267,7 @@ def find_available_players(
     LEFT JOIN league_ownership AS own
         ON pw.sleeper_id = own.sleeper_id
 
-    WHERE
-        pw.position = ?
-
-        AND own.sleeper_id IS NULL
+    {where_sql}
 
     GROUP BY
         pw.sleeper_id,
@@ -123,12 +276,40 @@ def find_available_players(
         pw.team
 
     ORDER BY
-        {sort_by} DESC
+        {order_sql}
 
     LIMIT {limit}
     """
 
+
     return query_dataframe(
         sql,
-        [position],
+        parameters,
+    )
+
+
+# ============================================================
+# BACKWARD-COMPATIBLE WRAPPER
+# ============================================================
+
+def find_available_players(
+    position,
+    sort_by="avg_opportunities",
+    limit=10,
+):
+    """
+    Temporary compatibility wrapper for the existing
+    Foundry tool agent.
+
+    Eventually the agent will call search_players()
+    directly.
+    """
+
+    return search_players(
+        position=position,
+        availability="unrostered",
+        sort_by=[
+            sort_by
+        ],
+        limit=limit,
     )
