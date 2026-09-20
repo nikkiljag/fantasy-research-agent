@@ -38,7 +38,7 @@ SEARCH_PLAYERS_SCHEMA = {
                 "TE",
             ],
             "description": (
-                "Fantasy football position to research."
+                "Optional fantasy football position."
             ),
         },
 
@@ -50,10 +50,9 @@ SEARCH_PLAYERS_SCHEMA = {
                 "all",
             ],
             "description": (
-                "Player ownership status. "
-                "IMPORTANT: available players, waiver players, "
-                "free agents, and unrostered players all mean "
-                "'unrostered'."
+                "Ownership status. Available, waiver, "
+                "free-agent, and unowned players mean "
+                "unrostered."
             ),
         },
 
@@ -62,6 +61,7 @@ SEARCH_PLAYERS_SCHEMA = {
             "items": {
                 "type": "string",
                 "enum": [
+                    "games",
                     "avg_carries",
                     "avg_targets",
                     "avg_opportunities",
@@ -72,9 +72,70 @@ SEARCH_PLAYERS_SCHEMA = {
             "minItems": 1,
             "maxItems": 3,
             "description": (
-                "Metrics used to rank players in priority order. "
-                "The first metric is primary, followed by "
-                "secondary tie-breaking metrics."
+                "Metrics used to rank results in priority order."
+            ),
+        },
+
+        "filters": {
+            "type": "array",
+            "description": (
+                "Optional numerical conditions that players "
+                "must satisfy."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+
+                    "metric": {
+                        "type": "string",
+                        "enum": [
+                            "games",
+                            "avg_carries",
+                            "avg_targets",
+                            "avg_opportunities",
+                            "avg_snap_pct",
+                            "avg_ppr",
+                        ],
+                    },
+
+                    "operator": {
+                        "type": "string",
+                        "enum": [
+                            "gt",
+                            "gte",
+                            "lt",
+                            "lte",
+                            "eq",
+                        ],
+                        "description": (
+                            "gt = greater than, "
+                            "gte = at least, "
+                            "lt = less than, "
+                            "lte = at most, "
+                            "eq = equal to."
+                        ),
+                    },
+
+                    "value": {
+                        "type": "number",
+                    },
+                },
+
+                "required": [
+                    "metric",
+                    "operator",
+                    "value",
+                ],
+            },
+        },
+
+        "last_n_weeks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 18,
+            "description": (
+                "Restrict research to the most recent "
+                "N NFL weeks available in the database."
             ),
         },
 
@@ -82,14 +143,10 @@ SEARCH_PLAYERS_SCHEMA = {
             "type": "integer",
             "minimum": 1,
             "maximum": 20,
-            "description": (
-                "Maximum number of players returned."
-            ),
         },
     },
 
     "required": [
-        "position",
         "availability",
         "sort_by",
     ],
@@ -103,57 +160,52 @@ SEARCH_PLAYERS_SCHEMA = {
 SYSTEM_PROMPT = """
 You are a fantasy football research agent.
 
-You have access to deterministic analytics backed by
-the user's actual fantasy league and NFL statistics.
+Use search_players to answer questions about NFL players
+using real fantasy league ownership and NFL statistics.
 
-Use search_players for player research.
+OWNERSHIP:
 
-OWNERSHIP TERMINOLOGY:
+- available = unrostered
+- waiver = unrostered
+- free agent = unrostered
+- unowned = unrostered
+- owned = rostered
+- rostered = rostered
 
-- "available" means unrostered
-- "waiver" or "waiver wire" means unrostered
-- "free agent" means unrostered
-- "unowned" means unrostered
-- "unrostered" means unrostered
-- "rostered" or "owned" means rostered
+METRICS:
 
-Never call rostered players available.
+- avg_carries = average rushing attempts per game
+- avg_targets = average targets per game
+- avg_opportunities = average carries + targets per game
+- avg_snap_pct = average offensive snap percentage
+- avg_ppr = average PPR fantasy points per game
+- games = number of games in the selected window
 
-DATA RULES:
+FILTER LANGUAGE:
 
-- Do not guess ownership.
-- Do not invent statistics.
-- Do not invent injuries, news, matchups, or depth-chart changes.
-- Base conclusions only on tool evidence.
-- Describe players relative to the requested metrics rather than
-  claiming they are universally the best.
+- "under 10 PPR" means:
+  metric=avg_ppr, operator=lt, value=10
 
-METRIC GUIDANCE:
+- "at least 6 targets" means:
+  metric=avg_targets, operator=gte, value=6
 
-RB:
-- avg_carries = rushing workload
-- avg_targets = receiving involvement
-- avg_opportunities = carries + targets
-- avg_snap_pct = percentage of offensive snaps played
-- avg_ppr = fantasy production
+- "over 50 percent snap share" means:
+  metric=avg_snap_pct, operator=gt, value=50
 
-WR / TE:
-- avg_targets is generally highly relevant
-- avg_snap_pct gives participation context
-- avg_ppr measures realized fantasy production
+TIME WINDOWS:
 
-QB:
-- Current generic metrics are limited for quarterback analysis.
+If the user says:
+- "last 2 weeks" -> last_n_weeks=2
+- "last 3 weeks" -> last_n_weeks=3
 
-SORTING:
+RULES:
 
-sort_by is ordered by priority.
-
-Example:
-
-["avg_targets", "avg_snap_pct"]
-
-means primarily rank by targets, then by snap share.
+- Use only tool-returned evidence.
+- Never invent statistics.
+- Never guess player availability.
+- Do not invent injuries, news, matchups, depth-chart changes,
+  or other information not returned by a tool.
+- Choose ranking metrics that match what the user actually asks.
 """
 
 
@@ -166,10 +218,8 @@ def normalize_search_arguments(
     arguments,
 ):
     """
-    Validate and correct important semantic constraints.
-
-    The LLM proposes arguments, but deterministic Python
-    has final authority over meanings such as "available".
+    Apply deterministic semantic guardrails after the
+    model proposes tool arguments.
     """
 
     normalized = dict(
@@ -177,13 +227,12 @@ def normalize_search_arguments(
     )
 
     question_lower = (
-        question
-        .lower()
+        question.lower()
     )
 
 
     # --------------------------------------------------------
-    # AVAILABILITY
+    # OWNERSHIP LANGUAGE
     # --------------------------------------------------------
 
     unrostered_phrases = [
@@ -238,6 +287,11 @@ def normalize_search_arguments(
     )
 
     normalized.setdefault(
+        "filters",
+        [],
+    )
+
+    normalized.setdefault(
         "limit",
         10,
     )
@@ -255,7 +309,7 @@ def execute_tool(
     arguments,
 ):
     """
-    Execute an approved fantasy research tool.
+    Execute an approved deterministic research tool.
     """
 
     if function_name == "search_players":
@@ -277,6 +331,15 @@ def execute_tool(
                 ],
             ),
 
+            filters=arguments.get(
+                "filters",
+                [],
+            ),
+
+            last_n_weeks=arguments.get(
+                "last_n_weeks"
+            ),
+
             limit=arguments.get(
                 "limit",
                 10,
@@ -284,8 +347,11 @@ def execute_tool(
         )
 
         return {
-            "rows": results.to_dicts()
+            "rows": (
+                results.to_dicts()
+            )
         }
+
 
     raise ValueError(
         f"Unknown tool: {function_name}"
@@ -298,8 +364,7 @@ def execute_tool(
 
 def read_response(response):
     """
-    Extract text and structured tool calls from
-    a Foundry Local response.
+    Extract text and structured tool calls.
     """
 
     text_parts = []
@@ -318,6 +383,7 @@ def read_response(response):
                 "arguments": item.arguments,
             })
 
+
         elif isinstance(
             item,
             TextItem,
@@ -326,6 +392,7 @@ def read_response(response):
             text_parts.append(
                 item.text
             )
+
 
         elif isinstance(
             item,
@@ -343,10 +410,12 @@ def read_response(response):
                         part.text
                     )
 
+
     return (
         "".join(
             text_parts
         ).strip(),
+
         tool_calls,
     )
 
@@ -356,30 +425,29 @@ def read_response(response):
 # ============================================================
 
 def run_tool_agent(question):
-    """
-    Run a generic fantasy-player research cycle.
-    """
 
     model = get_model()
 
     tool_history = []
 
+
     with ChatSession(
         model
     ) as session:
 
+
         # ----------------------------------------------------
-        # REGISTER TOOL
+        # REGISTER GENERIC RESEARCH TOOL
         # ----------------------------------------------------
 
         session.add_tool_definition(
             name="search_players",
 
             description=(
-                "Search fantasy football players using "
-                "NFL statistics and actual league ownership. "
-                "Available, waiver, free-agent, and unrostered "
-                "player searches must use availability='unrostered'."
+                "Search NFL fantasy players using real league "
+                "ownership and NFL statistics. Supports position, "
+                "availability, multiple ranking metrics, numerical "
+                "filters, and recent-week windows."
             ),
 
             json_schema=json.dumps(
@@ -389,14 +457,14 @@ def run_tool_agent(question):
 
 
         # ----------------------------------------------------
-        # ASK FOUNDRY TO PLAN TOOL CALL
+        # RESEARCH / TOOL PLANNING
         # ----------------------------------------------------
 
         session.set_options(
             RequestOptions(
                 search=SearchOptions(
                     temperature=0.0,
-                    max_output_tokens=350,
+                    max_output_tokens=450,
                 ),
 
                 tool_choice=(
@@ -420,6 +488,7 @@ def run_tool_agent(question):
                 )
             )
 
+
             with session.process_request(
                 request
             ) as response:
@@ -441,7 +510,7 @@ def run_tool_agent(question):
 
 
         # ----------------------------------------------------
-        # EXECUTE TOOL
+        # EXECUTE RESEARCH
         # ----------------------------------------------------
 
         with Request() as follow_up:
@@ -470,7 +539,6 @@ def run_tool_agent(question):
                 )
 
 
-                # Python validates/corrects semantic constraints.
                 arguments = (
                     normalize_search_arguments(
                         question,
@@ -484,7 +552,7 @@ def run_tool_agent(question):
                 )
 
                 print(
-                    f"{function_name}"
+                    function_name
                 )
 
                 print(
@@ -522,7 +590,7 @@ def run_tool_agent(question):
 
 
             # ------------------------------------------------
-            # FINAL NATURAL-LANGUAGE ANSWER
+            # FINAL ANSWER
             # ------------------------------------------------
 
             session.set_options(

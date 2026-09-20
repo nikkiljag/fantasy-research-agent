@@ -20,17 +20,22 @@ ALLOWED_AVAILABILITY = {
 }
 
 
-# These are logical analytics metrics that the agent is
-# allowed to request for sorting.
-#
-# The important idea is that the AI chooses from these
-# reusable concepts instead of writing arbitrary SQL.
-ALLOWED_SORT_METRICS = {
+ALLOWED_METRICS = {
+    "games",
     "avg_carries",
     "avg_targets",
     "avg_opportunities",
     "avg_snap_pct",
     "avg_ppr",
+}
+
+
+ALLOWED_OPERATORS = {
+    "gt": ">",
+    "gte": ">=",
+    "lt": "<",
+    "lte": "<=",
+    "eq": "=",
 }
 
 
@@ -42,37 +47,23 @@ def search_players(
     position=None,
     availability="all",
     sort_by=None,
+    filters=None,
+    last_n_weeks=None,
     limit=10,
 ):
     """
-    Generic fantasy-football player research tool.
+    Generic fantasy-football research engine.
 
-    The AI can control:
-    - position
-    - ownership/availability
-    - ranking metrics
-    - result count
-
-    Multiple sort metrics may be supplied.
-
-    Example:
-
-        search_players(
-            position="RB",
-            availability="unrostered",
-            sort_by=[
-                "avg_carries",
-                "avg_snap_pct",
-            ],
-            limit=10,
-        )
-
-    This ranks primarily by carries and then uses
-    snap share as the secondary ranking criterion.
+    Supports:
+    - position filtering
+    - league ownership filtering
+    - multiple ranking metrics
+    - arbitrary validated metric filters
+    - recent-week windows
     """
 
     # --------------------------------------------------------
-    # VALIDATE POSITION
+    # POSITION
     # --------------------------------------------------------
 
     if position is not None:
@@ -87,7 +78,7 @@ def search_players(
 
 
     # --------------------------------------------------------
-    # VALIDATE AVAILABILITY
+    # AVAILABILITY
     # --------------------------------------------------------
 
     availability = availability.lower()
@@ -95,13 +86,12 @@ def search_players(
     if availability not in ALLOWED_AVAILABILITY:
 
         raise ValueError(
-            f"Unsupported availability: "
-            f"{availability}"
+            f"Unsupported availability: {availability}"
         )
 
 
     # --------------------------------------------------------
-    # VALIDATE SORT METRICS
+    # SORTING
     # --------------------------------------------------------
 
     if sort_by is None:
@@ -122,16 +112,97 @@ def search_players(
 
     for metric in sort_by:
 
-        if metric not in ALLOWED_SORT_METRICS:
+        if metric not in ALLOWED_METRICS:
 
             raise ValueError(
-                f"Unsupported sort metric: "
-                f"{metric}"
+                f"Unsupported sort metric: {metric}"
             )
 
 
     # --------------------------------------------------------
-    # VALIDATE LIMIT
+    # FILTERS
+    # --------------------------------------------------------
+
+    if filters is None:
+        filters = []
+
+
+    validated_filters = []
+
+    for item in filters:
+
+        metric = item.get(
+            "metric"
+        )
+
+        operator = item.get(
+            "operator"
+        )
+
+        value = item.get(
+            "value"
+        )
+
+
+        if metric not in ALLOWED_METRICS:
+
+            raise ValueError(
+                f"Unsupported filter metric: {metric}"
+            )
+
+
+        if operator not in ALLOWED_OPERATORS:
+
+            raise ValueError(
+                f"Unsupported filter operator: {operator}"
+            )
+
+
+        try:
+
+            value = float(
+                value
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            raise ValueError(
+                f"Invalid filter value: {value}"
+            )
+
+
+        validated_filters.append({
+            "metric": metric,
+            "operator": operator,
+            "value": value,
+        })
+
+
+    # --------------------------------------------------------
+    # WEEK WINDOW
+    # --------------------------------------------------------
+
+    if last_n_weeks is not None:
+
+        last_n_weeks = int(
+            last_n_weeks
+        )
+
+        if (
+            last_n_weeks < 1
+            or last_n_weeks > 18
+        ):
+
+            raise ValueError(
+                "last_n_weeks must be between 1 and 18."
+            )
+
+
+    # --------------------------------------------------------
+    # LIMIT
     # --------------------------------------------------------
 
     limit = max(
@@ -143,18 +214,18 @@ def search_players(
     )
 
 
-    # --------------------------------------------------------
-    # BUILD FILTERS
-    # --------------------------------------------------------
+    # ========================================================
+    # BUILD BASE ROW FILTERS
+    # ========================================================
 
-    where_conditions = []
+    base_conditions = []
 
     parameters = []
 
 
     if position is not None:
 
-        where_conditions.append(
+        base_conditions.append(
             "pw.position = ?"
         )
 
@@ -165,34 +236,89 @@ def search_players(
 
     if availability == "unrostered":
 
-        where_conditions.append(
+        base_conditions.append(
             "own.sleeper_id IS NULL"
         )
 
     elif availability == "rostered":
 
-        where_conditions.append(
+        base_conditions.append(
             "own.sleeper_id IS NOT NULL"
         )
 
 
-    if where_conditions:
+    if last_n_weeks is not None:
 
-        where_sql = (
+        base_conditions.append(
+            """
+            pw.week >= (
+                SELECT MAX(week)
+                FROM player_week
+            ) - ?
+            """
+        )
+
+        parameters.append(
+            last_n_weeks - 1
+        )
+
+
+    if base_conditions:
+
+        base_where_sql = (
             "WHERE "
             + " AND ".join(
-                where_conditions
+                base_conditions
             )
         )
 
     else:
 
-        where_sql = ""
+        base_where_sql = ""
 
 
-    # --------------------------------------------------------
-    # BUILD SAFE ORDER BY
-    # --------------------------------------------------------
+    # ========================================================
+    # BUILD AGGREGATE FILTERS
+    # ========================================================
+
+    result_conditions = []
+
+
+    for item in validated_filters:
+
+        sql_operator = (
+            ALLOWED_OPERATORS[
+                item["operator"]
+            ]
+        )
+
+        result_conditions.append(
+            f"{item['metric']} "
+            f"{sql_operator} ?"
+        )
+
+        parameters.append(
+            item["value"]
+        )
+
+
+    if result_conditions:
+
+        result_where_sql = (
+            "WHERE "
+            + " AND ".join(
+                result_conditions
+            )
+        )
+
+    else:
+
+        result_where_sql = ""
+
+
+    # ========================================================
+    # SAFE ORDER BY
+    # ========================================================
 
     order_sql = ", ".join(
         f"{metric} DESC"
@@ -200,80 +326,88 @@ def search_players(
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # QUERY
-    # --------------------------------------------------------
+    # ========================================================
 
     sql = f"""
-    SELECT
-        pw.sleeper_id,
-        pw.name,
-        pw.position,
-        pw.team,
+    WITH aggregated AS (
 
-        COUNT(*) AS games,
+        SELECT
+            pw.sleeper_id,
+            pw.name,
+            pw.position,
+            pw.team,
 
-        ROUND(
-            AVG(
-                COALESCE(
-                    pw.carries,
-                    0
-                )
-            ),
-            2
-        ) AS avg_carries,
+            COUNT(*) AS games,
 
-        ROUND(
-            AVG(
-                COALESCE(
-                    pw.targets,
-                    0
-                )
-            ),
-            2
-        ) AS avg_targets,
+            ROUND(
+                AVG(
+                    COALESCE(
+                        pw.carries,
+                        0
+                    )
+                ),
+                2
+            ) AS avg_carries,
 
-        ROUND(
-            AVG(
-                COALESCE(
-                    pw.carries,
-                    0
-                )
-                +
-                COALESCE(
-                    pw.targets,
-                    0
-                )
-            ),
-            2
-        ) AS avg_opportunities,
+            ROUND(
+                AVG(
+                    COALESCE(
+                        pw.targets,
+                        0
+                    )
+                ),
+                2
+            ) AS avg_targets,
 
-        ROUND(
-            AVG(
-                pw.offense_pct
-            ) * 100,
-            1
-        ) AS avg_snap_pct,
+            ROUND(
+                AVG(
+                    COALESCE(
+                        pw.carries,
+                        0
+                    )
+                    +
+                    COALESCE(
+                        pw.targets,
+                        0
+                    )
+                ),
+                2
+            ) AS avg_opportunities,
 
-        ROUND(
-            AVG(
-                pw.fantasy_points_ppr
-            ),
-            2
-        ) AS avg_ppr
+            ROUND(
+                AVG(
+                    pw.offense_pct
+                ) * 100,
+                1
+            ) AS avg_snap_pct,
 
-    FROM player_week AS pw
+            ROUND(
+                AVG(
+                    pw.fantasy_points_ppr
+                ),
+                2
+            ) AS avg_ppr
 
-    LEFT JOIN league_ownership AS own
-        ON pw.sleeper_id = own.sleeper_id
+        FROM player_week AS pw
 
-    {where_sql}
+        LEFT JOIN league_ownership AS own
+            ON pw.sleeper_id = own.sleeper_id
 
-    GROUP BY
-        pw.sleeper_id,
-        pw.name,
-        pw.position,
-        pw.team
+        {base_where_sql}
+
+        GROUP BY
+            pw.sleeper_id,
+            pw.name,
+            pw.position,
+            pw.team
+    )
+
+    SELECT *
+    FROM aggregated
+
+    {result_where_sql}
 
     ORDER BY
         {order_sql}
@@ -289,7 +423,7 @@ def search_players(
 
 
 # ============================================================
-# BACKWARD-COMPATIBLE WRAPPER
+# OLD COMPATIBILITY WRAPPER
 # ============================================================
 
 def find_available_players(
@@ -298,11 +432,7 @@ def find_available_players(
     limit=10,
 ):
     """
-    Temporary compatibility wrapper for the existing
-    Foundry tool agent.
-
-    Eventually the agent will call search_players()
-    directly.
+    Compatibility wrapper retained temporarily.
     """
 
     return search_players(
