@@ -2,13 +2,13 @@ from ai.foundry_local import (
     stop_model,
 )
 
-from ai.research_agent import (
-    research,
+from ai.tool_agent import (
+    run_tool_agent,
 )
 
 
 print("\n==============================")
-print("FANTASY RESEARCH AGENT")
+print("FANTASY TOOL AGENT")
 print("==============================")
 
 
@@ -19,42 +19,35 @@ question = input(
 
 try:
 
-    result = research(
+    result = run_tool_agent(
         question
     )
 
-    print(
-        "\n=============================="
-    )
-
-    print(
-        "GENERATED SQL"
-    )
-
-    print(
-        "==============================\n"
-    )
-
-    print(
-        result["sql"]
-    )
-
 
     print(
         "\n=============================="
     )
 
     print(
-        "DATABASE RESULTS"
+        "TOOL ACTIVITY"
     )
 
     print(
-        "==============================\n"
+        "=============================="
     )
 
-    print(
-        result["results"]
-    )
+
+    for tool_call in result["tool_history"]:
+
+        print(
+            f"\nTool: "
+            f"{tool_call['tool']}"
+        )
+
+        print(
+            f"Arguments: "
+            f"{tool_call['arguments']}"
+        )
 
 
     print(
@@ -74,27 +67,10 @@ try:
     )
 
 
-    print(
-        "\n=============================="
-    )
-
-    print(
-        "VISUALIZATION SPEC"
-    )
-
-    print(
-        "==============================\n"
-    )
-
-    print(
-        result["visualization"]
-    )
-
-
 except Exception as error:
 
     print(
-        f"\nResearch failed: {error}"
+        f"\nAgent failed: {error}"
     )
 
 

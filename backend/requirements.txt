@@ -3,5 +3,5 @@ nflreadpy
 polars
 duckdb
 pyarrow
-foundry-local-sdk-winml
+foundry-local-sdk==2.0.1
 openai
