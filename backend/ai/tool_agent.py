@@ -1,4 +1,5 @@
 import json
+import re
 
 from foundry_local_sdk import (
     ChatSession,
@@ -22,6 +23,36 @@ from services.player_tools import (
 
 
 # ============================================================
+# METRICS
+# ============================================================
+
+TREND_METRICS = {
+    "carries_trend",
+    "targets_trend",
+    "opportunities_trend",
+    "snap_pct_trend",
+    "ppr_trend",
+}
+
+
+ALL_METRICS = [
+    "games",
+
+    "avg_carries",
+    "avg_targets",
+    "avg_opportunities",
+    "avg_snap_pct",
+    "avg_ppr",
+
+    "carries_trend",
+    "targets_trend",
+    "opportunities_trend",
+    "snap_pct_trend",
+    "ppr_trend",
+]
+
+
+# ============================================================
 # TOOL SCHEMA
 # ============================================================
 
@@ -38,7 +69,7 @@ SEARCH_PLAYERS_SCHEMA = {
                 "TE",
             ],
             "description": (
-                "Optional fantasy football position."
+                "Fantasy football position to research."
             ),
         },
 
@@ -60,26 +91,22 @@ SEARCH_PLAYERS_SCHEMA = {
             "type": "array",
             "items": {
                 "type": "string",
-                "enum": [
-                    "games",
-                    "avg_carries",
-                    "avg_targets",
-                    "avg_opportunities",
-                    "avg_snap_pct",
-                    "avg_ppr",
-                ],
+                "enum": ALL_METRICS,
             },
             "minItems": 1,
             "maxItems": 3,
             "description": (
-                "Metrics used to rank results in priority order."
+                "Metrics used to rank players in priority order. "
+                "Trend metrics measure whether usage or scoring "
+                "has been increasing or decreasing over completed "
+                "NFL weeks."
             ),
         },
 
         "filters": {
             "type": "array",
             "description": (
-                "Optional numerical conditions that players "
+                "Optional numerical conditions players "
                 "must satisfy."
             ),
             "items": {
@@ -88,14 +115,7 @@ SEARCH_PLAYERS_SCHEMA = {
 
                     "metric": {
                         "type": "string",
-                        "enum": [
-                            "games",
-                            "avg_carries",
-                            "avg_targets",
-                            "avg_opportunities",
-                            "avg_snap_pct",
-                            "avg_ppr",
-                        ],
+                        "enum": ALL_METRICS,
                     },
 
                     "operator": {
@@ -107,13 +127,6 @@ SEARCH_PLAYERS_SCHEMA = {
                             "lte",
                             "eq",
                         ],
-                        "description": (
-                            "gt = greater than, "
-                            "gte = at least, "
-                            "lt = less than, "
-                            "lte = at most, "
-                            "eq = equal to."
-                        ),
                     },
 
                     "value": {
@@ -134,8 +147,7 @@ SEARCH_PLAYERS_SCHEMA = {
             "minimum": 1,
             "maximum": 18,
             "description": (
-                "Restrict research to the most recent "
-                "N NFL weeks available in the database."
+                "Optional recent completed-week window."
             ),
         },
 
@@ -160,57 +172,79 @@ SEARCH_PLAYERS_SCHEMA = {
 SYSTEM_PROMPT = """
 You are a fantasy football research agent.
 
-Use search_players to answer questions about NFL players
-using real fantasy league ownership and NFL statistics.
+Your job is to investigate fantasy questions using
+deterministic analytics backed by the user's actual
+league and NFL statistics.
 
 OWNERSHIP:
 
 - available = unrostered
 - waiver = unrostered
+- waiver wire = unrostered
 - free agent = unrostered
 - unowned = unrostered
-- owned = rostered
 - rostered = rostered
+- owned = rostered
 
-METRICS:
+BASIC METRICS:
 
-- avg_carries = average rushing attempts per game
-- avg_targets = average targets per game
-- avg_opportunities = average carries + targets per game
-- avg_snap_pct = average offensive snap percentage
-- avg_ppr = average PPR fantasy points per game
-- games = number of games in the selected window
+- avg_carries = rushing attempts per game
+- avg_targets = targets per game
+- avg_opportunities = carries + targets per game
+- avg_snap_pct = offensive snap percentage
+- avg_ppr = PPR fantasy points per game
 
-FILTER LANGUAGE:
+TREND METRICS:
 
-- "under 10 PPR" means:
-  metric=avg_ppr, operator=lt, value=10
+- carries_trend = change in carries per week
+- targets_trend = change in targets per week
+- opportunities_trend = change in carries + targets per week
+- snap_pct_trend = change in snap percentage points per week
+- ppr_trend = change in fantasy scoring per week
 
-- "at least 6 targets" means:
-  metric=avg_targets, operator=gte, value=6
+CASUAL RESEARCH QUESTIONS:
 
-- "over 50 percent snap share" means:
-  metric=avg_snap_pct, operator=gt, value=50
+If a user asks about concepts like:
+- upside
+- breakout potential
+- emerging players
+- increasing role
+- players trending upward
 
-TIME WINDOWS:
+consider whether recent usage trends are relevant.
 
-If the user says:
-- "last 2 weeks" -> last_n_weeks=2
-- "last 3 weeks" -> last_n_weeks=3
+For WR and TE upside, targets, target trend, snap share,
+and snap-share trend can be useful.
+
+For RB upside, opportunities, opportunity trend, snap share,
+and snap-share trend can be useful.
+
+Do not assume historical usage guarantees future performance.
+
+IMPORTANT:
+
+The analytics system may report that there are not yet enough
+fully completed NFL weeks for reliable trend analysis.
+
+If that happens:
+- Do not pretend trend evidence exists.
+- Use the fallback usage evidence returned by the tool.
+- Clearly tell the user that trend history is not mature yet.
+- Frame the result as current usage-based candidates rather
+  than a reliable future projection.
 
 RULES:
 
-- Use only tool-returned evidence.
+- Never guess ownership.
 - Never invent statistics.
-- Never guess player availability.
-- Do not invent injuries, news, matchups, depth-chart changes,
-  or other information not returned by a tool.
-- Choose ranking metrics that match what the user actually asks.
+- Never invent injuries, matchups, depth-chart changes,
+  news, projections, or schedule facts.
+- Base conclusions only on tool-returned evidence.
 """
 
 
 # ============================================================
-# ARGUMENT GUARDRAILS
+# SEMANTIC GUARDRAILS
 # ============================================================
 
 def normalize_search_arguments(
@@ -218,8 +252,8 @@ def normalize_search_arguments(
     arguments,
 ):
     """
-    Apply deterministic semantic guardrails after the
-    model proposes tool arguments.
+    Validate important meanings after Foundry proposes
+    its tool arguments.
     """
 
     normalized = dict(
@@ -232,7 +266,7 @@ def normalize_search_arguments(
 
 
     # --------------------------------------------------------
-    # OWNERSHIP LANGUAGE
+    # OWNERSHIP
     # --------------------------------------------------------
 
     unrostered_phrases = [
@@ -301,61 +335,295 @@ def normalize_search_arguments(
 
 
 # ============================================================
+# FALLBACK LOGIC
+# ============================================================
+
+def question_has_explicit_week_window(
+    question,
+):
+    """
+    Determine whether the user explicitly requested a
+    historical window such as 'last 3 weeks'.
+    """
+
+    return bool(
+        re.search(
+            r"\blast\s+\d+\s+weeks?\b",
+            question.lower(),
+        )
+    )
+
+
+def get_fallback_sort_metrics(
+    position,
+    original_sort,
+):
+    """
+    Remove unavailable trend metrics and choose sensible
+    non-trend evidence when necessary.
+    """
+
+    non_trend_metrics = [
+        metric
+        for metric in original_sort
+        if metric not in TREND_METRICS
+    ]
+
+
+    if non_trend_metrics:
+
+        return (
+            non_trend_metrics[:3]
+        )
+
+
+    if position == "RB":
+
+        return [
+            "avg_opportunities",
+            "avg_snap_pct",
+            "avg_ppr",
+        ]
+
+
+    if position in {
+        "WR",
+        "TE",
+    }:
+
+        return [
+            "avg_targets",
+            "avg_snap_pct",
+            "avg_ppr",
+        ]
+
+
+    if position == "QB":
+
+        return [
+            "avg_ppr",
+        ]
+
+
+    return [
+        "avg_ppr",
+    ]
+
+
+def build_fallback_arguments(
+    question,
+    arguments,
+):
+    """
+    Build a safe alternative query when trend analysis
+    cannot yet be calculated.
+    """
+
+    fallback = dict(
+        arguments
+    )
+
+
+    fallback["sort_by"] = (
+        get_fallback_sort_metrics(
+            fallback.get(
+                "position"
+            ),
+
+            fallback.get(
+                "sort_by",
+                [],
+            ),
+        )
+    )
+
+
+    # Remove filters that depend on trend calculations.
+    fallback["filters"] = [
+        item
+        for item in fallback.get(
+            "filters",
+            [],
+        )
+        if item.get(
+            "metric"
+        ) not in TREND_METRICS
+    ]
+
+
+    # If the user did NOT explicitly request a historical
+    # window, allow ordinary averages to use the latest
+    # available player data.
+    if not question_has_explicit_week_window(
+        question
+    ):
+
+        fallback.pop(
+            "last_n_weeks",
+            None,
+        )
+
+
+    return fallback
+
+
+# ============================================================
 # TOOL EXECUTION
 # ============================================================
 
+def run_player_search(
+    arguments,
+):
+    """
+    Execute the deterministic search_players tool.
+    """
+
+    return search_players(
+        position=arguments.get(
+            "position"
+        ),
+
+        availability=arguments.get(
+            "availability",
+            "all",
+        ),
+
+        sort_by=arguments.get(
+            "sort_by",
+            [
+                "avg_opportunities"
+            ],
+        ),
+
+        filters=arguments.get(
+            "filters",
+            [],
+        ),
+
+        last_n_weeks=arguments.get(
+            "last_n_weeks"
+        ),
+
+        limit=arguments.get(
+            "limit",
+            10,
+        ),
+    )
+
+
 def execute_tool(
+    question,
     function_name,
     arguments,
 ):
     """
-    Execute an approved deterministic research tool.
+    Execute research.
+
+    If trend evidence is unavailable because too few
+    NFL weeks are complete, automatically fall back
+    to valid current usage evidence.
     """
 
-    if function_name == "search_players":
+    if function_name != "search_players":
 
-        results = search_players(
-            position=arguments.get(
-                "position"
-            ),
-
-            availability=arguments.get(
-                "availability",
-                "all",
-            ),
-
-            sort_by=arguments.get(
-                "sort_by",
-                [
-                    "avg_opportunities"
-                ],
-            ),
-
-            filters=arguments.get(
-                "filters",
-                [],
-            ),
-
-            last_n_weeks=arguments.get(
-                "last_n_weeks"
-            ),
-
-            limit=arguments.get(
-                "limit",
-                10,
-            ),
+        raise ValueError(
+            f"Unknown tool: {function_name}"
         )
 
+
+    try:
+
+        results = run_player_search(
+            arguments
+        )
+
+
         return {
+            "status": "success",
+
+            "analysis_note": (
+                "The requested analytics were available."
+            ),
+
+            "used_arguments": arguments,
+
             "rows": (
                 results.to_dicts()
-            )
+            ),
         }
 
 
-    raise ValueError(
-        f"Unknown tool: {function_name}"
-    )
+    except ValueError as error:
+
+        error_message = str(
+            error
+        )
+
+
+        trend_not_ready = (
+            "Trend analysis requires"
+            in error_message
+            or
+            "Trend analysis is not available"
+            in error_message
+        )
+
+
+        if not trend_not_ready:
+            raise
+
+
+        fallback_arguments = (
+            build_fallback_arguments(
+                question,
+                arguments,
+            )
+        )
+
+
+        print(
+            "\nTrend data is not mature yet."
+        )
+
+        print(
+            "Falling back to current "
+            "usage-based evidence."
+        )
+
+        print(
+            f"Fallback arguments: "
+            f"{fallback_arguments}"
+        )
+
+
+        results = run_player_search(
+            fallback_arguments
+        )
+
+
+        return {
+            "status": "fallback",
+
+            "analysis_note": (
+                f"{error_message} "
+                "The system therefore used current "
+                "usage and fantasy-production averages "
+                "instead of trend metrics. "
+                "This is not a true future projection."
+            ),
+
+            "requested_arguments": (
+                arguments
+            ),
+
+            "used_arguments": (
+                fallback_arguments
+            ),
+
+            "rows": (
+                results.to_dicts()
+            ),
+        }
 
 
 # ============================================================
@@ -363,12 +631,10 @@ def execute_tool(
 # ============================================================
 
 def read_response(response):
-    """
-    Extract text and structured tool calls.
-    """
 
     text_parts = []
     tool_calls = []
+
 
     for item in response:
 
@@ -424,7 +690,9 @@ def read_response(response):
 # AGENT
 # ============================================================
 
-def run_tool_agent(question):
+def run_tool_agent(
+    question,
+):
 
     model = get_model()
 
@@ -437,17 +705,17 @@ def run_tool_agent(question):
 
 
         # ----------------------------------------------------
-        # REGISTER GENERIC RESEARCH TOOL
+        # REGISTER RESEARCH TOOL
         # ----------------------------------------------------
 
         session.add_tool_definition(
             name="search_players",
 
             description=(
-                "Search NFL fantasy players using real league "
-                "ownership and NFL statistics. Supports position, "
-                "availability, multiple ranking metrics, numerical "
-                "filters, and recent-week windows."
+                "Search fantasy football players using "
+                "actual league ownership and NFL statistics. "
+                "Supports averages, numerical filters, recent "
+                "week windows, and usage/scoring trends."
             ),
 
             json_schema=json.dumps(
@@ -457,14 +725,14 @@ def run_tool_agent(question):
 
 
         # ----------------------------------------------------
-        # RESEARCH / TOOL PLANNING
+        # PLANNING TURN
         # ----------------------------------------------------
 
         session.set_options(
             RequestOptions(
                 search=SearchOptions(
                     temperature=0.0,
-                    max_output_tokens=450,
+                    max_output_tokens=500,
                 ),
 
                 tool_choice=(
@@ -518,8 +786,11 @@ def run_tool_agent(question):
             for tool_call in tool_calls:
 
                 function_name = (
-                    tool_call["name"]
+                    tool_call[
+                        "name"
+                    ]
                 )
+
 
                 proposed_arguments = (
                     json.loads(
@@ -561,6 +832,7 @@ def run_tool_agent(question):
 
 
                 result = execute_tool(
+                    question,
                     function_name,
                     arguments,
                 )
@@ -590,14 +862,14 @@ def run_tool_agent(question):
 
 
             # ------------------------------------------------
-            # FINAL ANSWER
+            # FINAL EXPLANATION
             # ------------------------------------------------
 
             session.set_options(
                 RequestOptions(
                     search=SearchOptions(
                         temperature=0.0,
-                        max_output_tokens=700,
+                        max_output_tokens=900,
                     ),
 
                     tool_choice=(
