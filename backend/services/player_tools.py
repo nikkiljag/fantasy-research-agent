@@ -1,5 +1,9 @@
 from database import query_dataframe
 
+from services.schedule_data import (
+    get_latest_completed_week,
+)
+
 
 # ============================================================
 # ALLOWED INPUTS
@@ -20,7 +24,7 @@ ALLOWED_AVAILABILITY = {
 }
 
 
-ALLOWED_METRICS = {
+BASIC_METRICS = {
     "games",
     "avg_carries",
     "avg_targets",
@@ -28,6 +32,21 @@ ALLOWED_METRICS = {
     "avg_snap_pct",
     "avg_ppr",
 }
+
+
+TREND_METRICS = {
+    "carries_trend",
+    "targets_trend",
+    "opportunities_trend",
+    "snap_pct_trend",
+    "ppr_trend",
+}
+
+
+ALLOWED_METRICS = (
+    BASIC_METRICS
+    | TREND_METRICS
+)
 
 
 ALLOWED_OPERATORS = {
@@ -56,11 +75,36 @@ def search_players(
 
     Supports:
     - position filtering
-    - league ownership filtering
+    - ownership filtering
     - multiple ranking metrics
-    - arbitrary validated metric filters
+    - numerical filters
     - recent-week windows
+    - usage and fantasy-point trends
+
+    Important behavior:
+
+    1. Without last_n_weeks:
+       Normal averages may include the newest available
+       player data, including data from the current week.
+
+    2. Trend calculations:
+       Only use fully completed NFL weeks.
+
+    3. With last_n_weeks:
+       The requested window refers to the most recent
+       fully completed NFL weeks.
+
+    4. Trend analysis requires at least two completed weeks.
     """
+
+    # --------------------------------------------------------
+    # LATEST COMPLETED NFL WEEK
+    # --------------------------------------------------------
+
+    latest_completed_week = (
+        get_latest_completed_week()
+    )
+
 
     # --------------------------------------------------------
     # POSITION
@@ -86,7 +130,8 @@ def search_players(
     if availability not in ALLOWED_AVAILABILITY:
 
         raise ValueError(
-            f"Unsupported availability: {availability}"
+            f"Unsupported availability: "
+            f"{availability}"
         )
 
 
@@ -115,7 +160,8 @@ def search_players(
         if metric not in ALLOWED_METRICS:
 
             raise ValueError(
-                f"Unsupported sort metric: {metric}"
+                f"Unsupported sort metric: "
+                f"{metric}"
             )
 
 
@@ -124,6 +170,7 @@ def search_players(
     # --------------------------------------------------------
 
     if filters is None:
+
         filters = []
 
 
@@ -147,14 +194,16 @@ def search_players(
         if metric not in ALLOWED_METRICS:
 
             raise ValueError(
-                f"Unsupported filter metric: {metric}"
+                f"Unsupported filter metric: "
+                f"{metric}"
             )
 
 
         if operator not in ALLOWED_OPERATORS:
 
             raise ValueError(
-                f"Unsupported filter operator: {operator}"
+                f"Unsupported filter operator: "
+                f"{operator}"
             )
 
 
@@ -197,7 +246,71 @@ def search_players(
         ):
 
             raise ValueError(
-                "last_n_weeks must be between 1 and 18."
+                "last_n_weeks must be "
+                "between 1 and 18."
+            )
+
+
+        if latest_completed_week is None:
+
+            raise ValueError(
+                "No fully completed NFL weeks "
+                "are available yet."
+            )
+
+
+    # --------------------------------------------------------
+    # CHECK WHETHER TREND DATA IS BEING REQUESTED
+    # --------------------------------------------------------
+
+    requested_metrics = set(
+        sort_by
+    )
+
+    requested_metrics.update(
+        item["metric"]
+        for item in validated_filters
+    )
+
+
+    trend_requested = bool(
+        requested_metrics
+        & TREND_METRICS
+    )
+
+
+    if trend_requested:
+
+        if latest_completed_week is None:
+
+            raise ValueError(
+                "Trend analysis is not available "
+                "because no NFL week has fully "
+                "completed yet."
+            )
+
+
+        if last_n_weeks is None:
+
+            completed_weeks_available = (
+                latest_completed_week
+            )
+
+        else:
+
+            completed_weeks_available = min(
+                last_n_weeks,
+                latest_completed_week,
+            )
+
+
+        if completed_weeks_available < 2:
+
+            raise ValueError(
+                "Trend analysis requires at least "
+                "two fully completed NFL weeks. "
+                f"The latest fully completed week "
+                f"is Week {latest_completed_week}."
             )
 
 
@@ -215,17 +328,17 @@ def search_players(
 
 
     # ========================================================
-    # BUILD BASE ROW FILTERS
+    # PLAYER / OWNERSHIP FILTERS
     # ========================================================
 
-    base_conditions = []
+    eligibility_conditions = []
 
     parameters = []
 
 
     if position is not None:
 
-        base_conditions.append(
+        eligibility_conditions.append(
             "pw.position = ?"
         )
 
@@ -236,49 +349,133 @@ def search_players(
 
     if availability == "unrostered":
 
-        base_conditions.append(
+        eligibility_conditions.append(
             "own.sleeper_id IS NULL"
         )
 
     elif availability == "rostered":
 
-        base_conditions.append(
+        eligibility_conditions.append(
             "own.sleeper_id IS NOT NULL"
         )
 
 
-    if last_n_weeks is not None:
+    if eligibility_conditions:
 
-        base_conditions.append(
-            """
-            pw.week >= (
-                SELECT MAX(week)
-                FROM player_week
-            ) - ?
-            """
-        )
-
-        parameters.append(
-            last_n_weeks - 1
-        )
-
-
-    if base_conditions:
-
-        base_where_sql = (
+        eligibility_where_sql = (
             "WHERE "
             + " AND ".join(
-                base_conditions
+                eligibility_conditions
             )
         )
 
     else:
 
-        base_where_sql = ""
+        eligibility_where_sql = ""
 
 
     # ========================================================
-    # BUILD AGGREGATE FILTERS
+    # AVERAGE STAT WINDOW
+    # ========================================================
+
+    average_conditions = []
+
+
+    # If the user explicitly asks for the last N weeks,
+    # use only fully completed weeks for the whole request.
+    if last_n_weeks is not None:
+
+        start_week = max(
+            1,
+            latest_completed_week
+            - last_n_weeks
+            + 1,
+        )
+
+        average_conditions.append(
+            "week >= ?"
+        )
+
+        parameters.append(
+            start_week
+        )
+
+        average_conditions.append(
+            "week <= ?"
+        )
+
+        parameters.append(
+            latest_completed_week
+        )
+
+
+    if average_conditions:
+
+        average_where_sql = (
+            "WHERE "
+            + " AND ".join(
+                average_conditions
+            )
+        )
+
+    else:
+
+        average_where_sql = ""
+
+
+    # ========================================================
+    # TREND WINDOW
+    # ========================================================
+
+    trend_conditions = []
+
+
+    if latest_completed_week is None:
+
+        # Deliberately produce no trend-source rows.
+        trend_conditions.append(
+            "1 = 0"
+        )
+
+    else:
+
+        trend_conditions.append(
+            "week <= ?"
+        )
+
+        parameters.append(
+            latest_completed_week
+        )
+
+
+        if last_n_weeks is not None:
+
+            trend_start_week = max(
+                1,
+                latest_completed_week
+                - last_n_weeks
+                + 1,
+            )
+
+            trend_conditions.append(
+                "week >= ?"
+            )
+
+            parameters.append(
+                trend_start_week
+            )
+
+
+    trend_where_sql = (
+        "WHERE "
+        + " AND ".join(
+            trend_conditions
+        )
+    )
+
+
+    # ========================================================
+    # RESULT FILTERS
     # ========================================================
 
     result_conditions = []
@@ -321,7 +518,7 @@ def search_players(
     # ========================================================
 
     order_sql = ", ".join(
-        f"{metric} DESC"
+        f"{metric} DESC NULLS LAST"
         for metric in sort_by
     )
 
@@ -331,20 +528,54 @@ def search_players(
     # ========================================================
 
     sql = f"""
-    WITH aggregated AS (
+    WITH eligible AS (
 
         SELECT
-            pw.sleeper_id,
-            pw.name,
-            pw.position,
-            pw.team,
+            pw.*
+
+        FROM player_week AS pw
+
+        LEFT JOIN league_ownership AS own
+            ON pw.sleeper_id = own.sleeper_id
+
+        {eligibility_where_sql}
+    ),
+
+
+    average_source AS (
+
+        SELECT *
+
+        FROM eligible
+
+        {average_where_sql}
+    ),
+
+
+    trend_source AS (
+
+        SELECT *
+
+        FROM eligible
+
+        {trend_where_sql}
+    ),
+
+
+    averages AS (
+
+        SELECT
+            sleeper_id,
+            name,
+            position,
+            team,
 
             COUNT(*) AS games,
 
             ROUND(
                 AVG(
                     COALESCE(
-                        pw.carries,
+                        carries,
                         0
                     )
                 ),
@@ -354,7 +585,7 @@ def search_players(
             ROUND(
                 AVG(
                     COALESCE(
-                        pw.targets,
+                        targets,
                         0
                     )
                 ),
@@ -364,12 +595,12 @@ def search_players(
             ROUND(
                 AVG(
                     COALESCE(
-                        pw.carries,
+                        carries,
                         0
                     )
                     +
                     COALESCE(
-                        pw.targets,
+                        targets,
                         0
                     )
                 ),
@@ -378,34 +609,170 @@ def search_players(
 
             ROUND(
                 AVG(
-                    pw.offense_pct
+                    offense_pct
                 ) * 100,
                 1
             ) AS avg_snap_pct,
 
             ROUND(
                 AVG(
-                    pw.fantasy_points_ppr
+                    fantasy_points_ppr
                 ),
                 2
             ) AS avg_ppr
 
-        FROM player_week AS pw
-
-        LEFT JOIN league_ownership AS own
-            ON pw.sleeper_id = own.sleeper_id
-
-        {base_where_sql}
+        FROM average_source
 
         GROUP BY
-            pw.sleeper_id,
-            pw.name,
-            pw.position,
-            pw.team
+            sleeper_id,
+            name,
+            position,
+            team
+    ),
+
+
+    trends AS (
+
+        SELECT
+            sleeper_id,
+
+            CASE
+                WHEN COUNT(
+                    DISTINCT week
+                ) >= 2
+                THEN ROUND(
+                    REGR_SLOPE(
+                        COALESCE(
+                            carries,
+                            0
+                        ),
+                        week
+                    ),
+                    2
+                )
+                ELSE NULL
+            END AS carries_trend,
+
+
+            CASE
+                WHEN COUNT(
+                    DISTINCT week
+                ) >= 2
+                THEN ROUND(
+                    REGR_SLOPE(
+                        COALESCE(
+                            targets,
+                            0
+                        ),
+                        week
+                    ),
+                    2
+                )
+                ELSE NULL
+            END AS targets_trend,
+
+
+            CASE
+                WHEN COUNT(
+                    DISTINCT week
+                ) >= 2
+                THEN ROUND(
+                    REGR_SLOPE(
+                        COALESCE(
+                            carries,
+                            0
+                        )
+                        +
+                        COALESCE(
+                            targets,
+                            0
+                        ),
+                        week
+                    ),
+                    2
+                )
+                ELSE NULL
+            END AS opportunities_trend,
+
+
+            CASE
+                WHEN COUNT(
+                    DISTINCT CASE
+                        WHEN offense_pct
+                        IS NOT NULL
+                        THEN week
+                    END
+                ) >= 2
+                THEN ROUND(
+                    REGR_SLOPE(
+                        offense_pct * 100,
+                        week
+                    ),
+                    2
+                )
+                ELSE NULL
+            END AS snap_pct_trend,
+
+
+            CASE
+                WHEN COUNT(
+                    DISTINCT CASE
+                        WHEN fantasy_points_ppr
+                        IS NOT NULL
+                        THEN week
+                    END
+                ) >= 2
+                THEN ROUND(
+                    REGR_SLOPE(
+                        fantasy_points_ppr,
+                        week
+                    ),
+                    2
+                )
+                ELSE NULL
+            END AS ppr_trend
+
+        FROM trend_source
+
+        GROUP BY
+            sleeper_id
+    ),
+
+
+    combined AS (
+
+        SELECT
+            a.sleeper_id,
+            a.name,
+            a.position,
+            a.team,
+
+            a.games,
+            a.avg_carries,
+            a.avg_targets,
+            a.avg_opportunities,
+            a.avg_snap_pct,
+            a.avg_ppr,
+
+            t.carries_trend,
+            t.targets_trend,
+            t.opportunities_trend,
+            t.snap_pct_trend,
+            t.ppr_trend
+
+        FROM averages AS a
+
+        LEFT JOIN trends AS t
+            ON
+                a.sleeper_id
+                =
+                t.sleeper_id
     )
 
+
     SELECT *
-    FROM aggregated
+
+    FROM combined
 
     {result_where_sql}
 
@@ -423,7 +790,7 @@ def search_players(
 
 
 # ============================================================
-# OLD COMPATIBILITY WRAPPER
+# COMPATIBILITY WRAPPER
 # ============================================================
 
 def find_available_players(
@@ -432,7 +799,7 @@ def find_available_players(
     limit=10,
 ):
     """
-    Compatibility wrapper retained temporarily.
+    Temporary compatibility wrapper for older code.
     """
 
     return search_players(
