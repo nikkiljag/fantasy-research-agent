@@ -1,7 +1,7 @@
 # Fantasy Research Agent
 
 > **Technical Project Journal, Architecture Notes, and Engineering Write-Up Source**  
-> A living document for learning, portfolio documentation, and a future public write-up.
+
 
 **Status:** Local data + analytics complete; FastAPI works locally; Azure/Foundry deployment in progress  
 **Primary goal:** Build an evidence-first fantasy football research agent while gaining practical Microsoft Azure and Foundry experience  
