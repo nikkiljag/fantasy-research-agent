@@ -1,0 +1,16 @@
+.git
+.gitignore
+
+backend/.venv
+**/__pycache__
+*.pyc
+
+data/cache
+data/raw
+data/processed
+
+frontend/node_modules
+frontend/.next
+
+.vscode
+.idea

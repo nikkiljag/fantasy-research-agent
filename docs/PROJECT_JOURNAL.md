@@ -3,9 +3,9 @@
 > **Technical Project Journal, Architecture Notes, and Engineering Write-Up Source**  
 
 
-**Status:** Local data + analytics complete; FastAPI works locally; Azure/Foundry deployment in progress  
+**Status:** End-to-end cloud backend vertical slice complete; Microsoft Foundry successfully calls the secured Azure-hosted analytics API; frontend is the next major milestone  
 **Primary goal:** Build an evidence-first fantasy football research agent while gaining practical Microsoft Azure and Foundry experience  
-**Core stack:** Python, Sleeper API, nflverse, Polars, DuckDB, FastAPI, OpenAPI, Foundry Local, Microsoft Foundry, Docker, WSL 2, Azure Container Registry, Azure Container Apps  
+**Core stack:** Python, Sleeper API, nflverse, Polars, DuckDB, FastAPI, OpenAPI, Foundry Local, Microsoft Foundry, GPT-4.1 mini, Docker, WSL 2, Azure Container Registry, Azure Container Apps, Azure Managed Identity  
 **Last updated:** October 5, 2026
 
 ---
@@ -74,16 +74,21 @@ The current system is intentionally layered.
 
 ```mermaid
 flowchart TD
-    A[User question] --> B[Microsoft Foundry agent]
-    B -->|chooses tool + parameters| C[FastAPI / OpenAPI backend]
-    C --> D[Python analytics + guardrails]
-    D --> E[DuckDB]
-    E --> F[Sleeper league context]
-    E --> G[nflverse NFL data]
-    D --> H[Structured evidence]
-    H --> B
-    B --> I[User-facing explanation]
-    H --> J[Future frontend tables / cards / charts]
+    A[User question] --> B[Microsoft Foundry agent / GPT-4.1 mini]
+    B --> C[fantasy_player_research OpenAPI tool]
+    C --> D[Foundry custom connection]
+    D -->|x-api-key| E[Azure Container Apps / FastAPI]
+    E --> F[Python analytics + guardrails]
+    F --> G[DuckDB snapshot]
+    G --> H[Sleeper league ownership]
+    G --> I[nflverse NFL data]
+    F --> J[Structured evidence]
+    J --> B
+    B --> K[User-facing explanation]
+    J --> L[Frontend tables / cards / charts]
+
+    M[Local Docker build] --> N[Azure Container Registry]
+    N -->|AcrPull via managed identity| E
 ```
 
 During development there are currently **two AI paths**:
@@ -105,17 +110,20 @@ This section explains what each technology is in general and what it specificall
 | **nflverse / nflreadpy** | Open NFL datasets exposed through a Python package. | Supplies weekly player stats, schedules, roster status, snap counts, and identifier mappings used to analyze actual NFL usage. | Implemented |
 | **Python** | The main programming language for the backend. | Coordinates ingestion, cleaning, ID mapping, analytics, tool validation, API logic, and refresh workflows. | Implemented |
 | **Polars** | A high-performance dataframe library. | Transforms Sleeper and nflverse-derived data before it is persisted or returned to the application. | Implemented |
-| **DuckDB** | An embedded analytical SQL database optimized for local analytics. | Stores normalized tables such as `player_week` and `league_ownership` and performs fast joins, filters, averages, and trend calculations. | Implemented locally |
-| **FastAPI** | A modern Python web API framework. | Turns internal analytics functions into stable HTTP endpoints that a frontend or AI agent can call. | Working locally |
-| **OpenAPI** | A machine-readable standard for describing HTTP APIs. | FastAPI generates the schema automatically. Foundry can use that contract to understand available tools and their arguments. | Generated locally |
-| **Uvicorn** | An ASGI server used to run Python web applications. | Runs the FastAPI app during local development. | Implemented |
+| **DuckDB** | An embedded analytical SQL database optimized for local analytics. | Stores normalized tables such as `player_week` and `league_ownership` and performs fast joins, filters, averages, and trend calculations. The current cloud container includes a snapshot of this database. | Implemented; cloud snapshot currently baked into image |
+| **FastAPI** | A modern Python web API framework. | Turns internal analytics functions into stable HTTP endpoints that a frontend or AI agent can call. | Deployed to Azure Container Apps |
+| **OpenAPI** | A machine-readable standard for describing HTTP APIs. | Defines the agent-facing `search_players` contract and allows Foundry to call the backend as a tool. | Attached to Foundry agent |
+| **Uvicorn** | An ASGI server used to run Python web applications. | Runs the FastAPI application inside the Docker container. | Implemented |
 | **Foundry Local** | Microsoft's local AI runtime and SDK. | Used as a development harness to test structured tool calling with a local Qwen model before relying on cloud inference. | Implemented |
-| **Microsoft Foundry** | Microsoft's cloud AI development and orchestration platform. | Hosts the cloud project, model deployment, and agent that will reason over deterministic FastAPI tools. | Configured |
-| **GPT-4.1 mini** | A cloud language model deployment. | Acts as the cloud reasoning model that will choose tools, interpret evidence, and generate user-facing explanations. | Deployed |
-| **Docker** | A containerization platform that packages an application and its dependencies into a reproducible image. | Packages FastAPI, Python dependencies, backend code, and initially a database snapshot so Azure can run the same application environment. | Installed; local build next |
-| **WSL 2** | Windows Subsystem for Linux, a lightweight Linux environment on Windows. | Provides the Linux environment Docker Desktop uses to build and run Linux containers from the Windows development machine. | Installed; verification in progress |
-| **Azure Container Registry (ACR)** | A private registry for storing container images. | Stores the locally built `fantasy-research-api` image before Azure Container Apps pulls and runs it. | Registry created; image push pending |
-| **Azure Container Apps** | A managed Azure service for running containerized web services without managing virtual machines. | Will host the FastAPI backend on a public HTTPS endpoint so the Foundry cloud agent can reach it. | Environment created; deployment pending |
+| **Microsoft Foundry** | Microsoft's cloud AI development and orchestration platform. | Hosts the project, GPT-4.1 mini deployment, prompt agent, connection, tool configuration, traces, and future evaluations. | End-to-end tool calling working |
+| **GPT-4.1 mini** | A cloud language model deployment. | Interprets natural-language questions, calls the research tool, and explains deterministic evidence. | Deployed and tested |
+| **Docker** | A containerization platform that packages an application and its dependencies into a reproducible image. | Packages FastAPI, Python dependencies, backend code, and the current DuckDB snapshot into the deployable backend image. | Working; v2 image built locally |
+| **WSL 2** | Windows Subsystem for Linux, a lightweight Linux environment on Windows. | Provides the Linux environment Docker Desktop uses to build and run Linux containers from the Windows development machine. | Installed and working |
+| **Azure Container Registry (ACR)** | A private registry for storing container images. | Stores versioned backend images such as `fantasy-research-api:v1` and `:v2`. | Working |
+| **Azure Container Apps** | A managed Azure service for running containerized web services without managing virtual machines. | Hosts the live FastAPI backend on HTTPS. | Deployed and working |
+| **Azure Managed Identity** | An Azure identity assigned to a resource or workload. | Gives the Container App permission to pull the private image from ACR without storing registry credentials. | Implemented |
+| **Container Apps Secrets** | Secret storage attached to an Azure Container App. | Stores the backend API key and exposes it to FastAPI through `FANTASY_API_KEY`. | Implemented |
+| **Foundry custom connection** | A credential object used by Foundry tools. | Stores the `x-api-key` credential as a secret so the OpenAPI tool can authenticate to FastAPI without embedding the key in source or schema. | Implemented |
 | **Git + GitHub** | Version control plus hosted source repository. | Tracks code, architecture notes, engineering decisions, project history, and this journal. | Implemented |
 
 ---
@@ -250,31 +258,113 @@ The agent instructions emphasize that it should prefer tool-provided evidence an
 
 Azure role-based access control also became part of the setup. Infrastructure ownership alone did not provide the required Foundry data-plane access, so the **Foundry User** role had to be assigned.
 
+
+## 6.7 Dockerized backend and Azure deployment
+
+The FastAPI backend is now packaged as a Linux Docker image and has been validated in two environments:
+
+1. locally through Docker Desktop, and
+2. remotely through Azure Container Apps.
+
+The first working image was tagged `v1` and pushed to Azure Container Registry. A later `v2` image added API-key authentication.
+
+Because Azure for Students did not permit ACR Tasks, the image is built on the development machine and then pushed to ACR. Azure Container Apps pulls the image from the private registry using a user-assigned managed identity with the `AcrPull` role.
+
+The public Azure service exposes `/health`, `/docs`, and the protected analytics endpoint over HTTPS.
+
+## 6.8 API security and secret handling
+
+The agent-facing analytics endpoint is protected with an `x-api-key` header.
+
+The secret is deliberately kept out of source control:
+
+```text
+Foundry custom connection
+        ↓ x-api-key
+Azure Container Apps HTTPS endpoint
+        ↓
+FastAPI APIKeyHeader validation
+        ↓
+FANTASY_API_KEY environment variable
+        ↓
+Container Apps secret
+```
+
+The API key is stored as a secret in Azure Container Apps and injected into the container as an environment variable. The same credential is stored as a secret inside a Foundry custom connection. The OpenAPI schema declares the header name but never contains the actual secret value.
+
+## 6.9 Foundry OpenAPI tool integration
+
+The cloud agent now has a custom OpenAPI tool named `fantasy_player_research`.
+
+The tool exposes the deterministic `search_players` capability with structured fields for position, availability, ranking metrics, filters, recent-week windows, and limits.
+
+An important debugging lesson occurred here: creating an OpenAPI tool resource was not enough by itself. The tool also had to be attached to the active agent version and saved. A Foundry trace initially showed several model calls and **zero tool calls**, which explained why the model fabricated placeholder players when it failed to use the backend.
+
+After attaching the tool correctly, the trace and response behavior changed to the intended architecture.
+
+## 6.10 First successful end-to-end cloud research query
+
+The first successful end-to-end test asked the Foundry agent:
+
+> "What unrostered WRs in my league have the strongest target volume? Give me the top 5 and explain briefly using the data."
+
+The agent called the Azure-hosted research tool and returned real player names plus target, snap-share, and PPR evidence from the backend.
+
+This proved the full cloud path:
+
+```text
+natural-language question
+→ GPT-4.1 mini Foundry agent
+→ OpenAPI tool
+→ secret-backed API key
+→ Azure Container Apps
+→ FastAPI
+→ deterministic analytics
+→ DuckDB
+→ structured evidence
+→ model explanation
+```
+
+This is the project's first complete **cloud vertical slice**.
+
+
 ---
 
 # 7. How a User Question Flows Through the System
 
-A future user may ask:
+A user can now ask a question such as:
 
-> "Which waiver WRs have the best upside?"
+> "What unrostered WRs in my league have the strongest target volume?"
 
-The intended flow is:
+The current cloud flow is:
 
-1. The user asks a freeform fantasy question.
-2. The Foundry agent interprets the request and chooses a research tool plus structured parameters.
-3. The agent calls a FastAPI endpoint described by the OpenAPI schema.
-4. FastAPI validates the request and calls the deterministic Python analytics layer.
-5. DuckDB queries league ownership and NFL usage data.
-6. Python applies semantic and data-quality guardrails.
-7. FastAPI returns structured evidence, including real player names and calculated metrics.
-8. The Foundry model explains the evidence to the user.
-9. A future frontend renders the same returned data as tables, cards, and charts.
+1. The user asks a freeform fantasy question in the Foundry agent.
+2. GPT-4.1 mini interprets the request.
+3. The agent selects the `fantasy_player_research` OpenAPI tool.
+4. Foundry supplies the secret `x-api-key` through the configured custom connection.
+5. The tool sends an HTTPS request to the FastAPI service running in Azure Container Apps.
+6. FastAPI authenticates the request and validates the structured arguments.
+7. The deterministic Python analytics layer queries DuckDB.
+8. DuckDB combines league ownership and nflverse-derived player data.
+9. FastAPI returns structured player rows and calculated metrics.
+10. GPT-4.1 mini explains those returned facts to the user.
 
 ### Why this flow matters
 
-The AI is not being asked to "remember" fantasy football data. It receives a controlled way to retrieve current, league-specific evidence.
+The model is not being asked to "remember" fantasy football data or calculate rankings from prose. It receives a controlled way to retrieve league-specific evidence.
 
-That means the language model can eventually be changed without rebuilding the data and analytics architecture underneath it.
+The same structured response can later power a React frontend, tables, player cards, and charts without asking the model to manufacture display data.
+
+### Current limitation
+
+The cloud container currently carries a **snapshot** of the DuckDB database from the local refresh pipeline. The cloud path works, but it is not yet continuously refreshed.
+
+That distinction matters:
+
+> The cloud reasoning and API architecture are working, but the data-persistence layer is still development-stage rather than production-live.
+
+The next backend evolution will move refreshable data into an Azure-backed persistence/synchronization design.
+
 
 ---
 
@@ -342,6 +432,42 @@ This preserves the same production architecture while moving the image build ste
 
 > A failed cloud deployment is not automatically a code failure. Application errors, identity problems, subscription restrictions, networking issues, provider registration, and platform constraints are different categories of failure and should be debugged separately.
 
+
+## 8.8 Use managed identity for private container pulls
+
+The Container App uses a user-assigned managed identity with the `AcrPull` role rather than storing Azure Container Registry credentials.
+
+This keeps infrastructure authentication separate from application-level API authentication.
+
+## 8.9 Store application secrets outside source control
+
+The FastAPI tool endpoint requires an API key, but the key is not committed to GitHub and is not embedded in the OpenAPI document.
+
+Azure Container Apps stores the backend copy as a secret. Microsoft Foundry stores the caller copy in a secret custom connection.
+
+## 8.10 Treat agent traces as part of debugging
+
+When the Foundry agent produced fake placeholder players, the failure initially looked like a model-quality problem.
+
+The trace showed a more precise cause: five model/chat calls occurred and no tool invocation occurred. This changed the debugging target from the data backend to the agent configuration.
+
+The resulting lesson is:
+
+> In agentic systems, inspect the execution path before rewriting prompts or backend code. A wrong answer can originate from orchestration rather than reasoning or data.
+
+## 8.11 Tool creation and tool attachment are separate concerns
+
+A custom OpenAPI tool can exist without being attached to the active agent version.
+
+The project therefore treats tool attachment and agent save/version state as explicit deployment steps rather than assuming tool creation automatically changes agent behavior.
+
+## 8.12 Rate-limit quota is capacity, not evidence of spend
+
+The GPT-4.1 mini deployment encountered a token-per-minute rate limit once the agent carried larger instructions and tool schemas. The development quota was raised to 50K TPM.
+
+This allocation controls request throughput. It should not be confused with continuously consuming 50K tokens per minute.
+
+
 ---
 
 # 9. Docker and WSL in This Project
@@ -407,32 +533,46 @@ Azure   = runs the packaged application in the cloud
 
 | Area | State | Notes |
 |---|---|---|
-| Data ingestion | Complete | Sleeper + nflverse data refreshes into DuckDB. |
-| Deterministic analytics | Complete | Generic player search and schedule-aware trend guards are working. |
+| Data ingestion | Complete for v1 | Sleeper + nflverse refreshes into DuckDB. |
+| Deterministic analytics | Complete for v1 | Generic player search and schedule-aware trend guards are working. |
 | Local AI tool calling | Complete | Foundry Local can request structured tools and explain returned evidence. |
-| FastAPI | Complete locally | `/docs` and `/openapi.json` are available on localhost. |
-| Foundry cloud project | Complete | Resource, project, model deployment, and agent are configured. |
-| Docker Desktop | Installed | Required because ACR Tasks are unavailable on the student subscription. |
-| WSL 2 | Installed | Used by Docker Desktop for Linux containers; final Docker verification is the immediate next step. |
-| Azure Container Registry | Created | Image push pending. |
-| Azure Container Apps environment | Created | Application deployment pending. |
-| Azure API deployment | Next | Build locally, push image to ACR, deploy to Container Apps. |
-| Foundry → API tool | After deployment | Attach the hosted OpenAPI endpoint to the Foundry agent. |
-| Frontend | Next major product milestone | Build against real API responses rather than mock data. |
-| Cloud data persistence | Near-term improvement | Move beyond a baked DuckDB snapshot to an Azure-backed refresh/storage design. |
-| Predictive model | Later | Add true forward-looking projections once historical/context pipelines are mature. |
+| FastAPI | Live | Runs locally and in Azure Container Apps. |
+| API authentication | Complete for current tool | `x-api-key` validated by FastAPI; secret stored outside Git. |
+| Docker / WSL 2 | Complete | Linux image builds and runs locally. |
+| Azure Container Registry | Complete | Versioned backend images pushed successfully. |
+| Managed identity | Complete | Container App pulls private ACR image using `AcrPull`. |
+| Azure Container Apps | Live | Public HTTPS backend is deployed. |
+| Foundry cloud project | Complete | GPT-4.1 mini agent is configured. |
+| Foundry custom connection | Complete | Secret API-key credential is stored in Foundry. |
+| OpenAPI research tool | Complete | `fantasy_player_research` is attached to the active agent. |
+| End-to-end cloud query | Complete | Natural language → Foundry → Azure API → DuckDB → evidence → answer is working. |
+| Frontend | **Next major milestone** | Build against real endpoints and real returned data rather than mocks. |
+| Cloud data persistence | Next backend phase | Replace baked DuckDB snapshot with refreshable Azure-backed storage/sync. |
+| Multi-league sync / caching | Planned | Add user→league→roster mapping and scheduled/background ingestion. |
+| Play-by-play features | Planned | Add richer opportunity and expected-value metrics from nflverse data where feasible. |
+| Injury/news/weather grounding | Planned | Use live structured sources plus retrieval for unstructured context. |
+| Predictive modeling | Planned | Add forward-looking projections and backtesting after data pipelines mature. |
+| Tracing / evaluation | Partially implemented | Foundry traces already used for debugging; formal evaluations come later. |
 
-### Immediate deployment path
+### Immediate path from here
 
 ```mermaid
 flowchart LR
-    A[Source code] --> B[Docker build on local PC]
-    B --> C[Container image]
-    C --> D[Azure Container Registry]
-    D --> E[Azure Container Apps]
-    E --> F[Public FastAPI HTTPS endpoint]
-    F --> G[Microsoft Foundry agent]
+    A[Working cloud backend] --> B[React / Next.js frontend]
+    B --> C[Cloud-refreshable data layer]
+    C --> D[Multi-league sync + caching]
+    D --> E[Advanced usage + play-by-play features]
+    E --> F[Injury / news / weather grounding]
+    F --> G[Predictive models + backtesting]
+    G --> H[Formal Foundry evaluations + observability]
 ```
+
+### Why frontend starts now
+
+The project now has one complete vertical slice from a natural-language question to a real deterministic answer. That is enough backend stability to begin UI development without relying on fake frontend data.
+
+The backend is not "finished." It is simply mature enough that later infrastructure and analytics upgrades can be added behind a real product surface instead of delaying the interface indefinitely.
+
 
 ---
 
@@ -534,6 +674,120 @@ Install Docker Desktop and WSL 2, build the image locally, then push the finishe
 
 Cloud architecture often survives even when an implementation path changes. The final deployment target did not need to change; only the build stage moved from Azure infrastructure to the local development machine.
 
+
+## Milestone: Building and validating the first container image
+
+### Problem
+
+The application needed to prove that it could run outside the Windows/Python virtual environment where it was developed.
+
+### Decision
+
+Build `fantasy-research-api` locally with Docker, run the container on port 8000, and test the FastAPI `/health`, `/docs`, and `/tools/search-players` endpoints from the browser.
+
+### Result
+
+The container returned real league/player analytics from the packaged DuckDB snapshot.
+
+### What this taught
+
+A successful container test is stronger than simply having a valid Dockerfile. It proves the packaged runtime can execute the real application and data path.
+
+---
+
+## Milestone: Deploying the backend to Azure Container Apps
+
+### Problem
+
+Microsoft Foundry is cloud-hosted and cannot call `127.0.0.1` on the development laptop.
+
+### Decision
+
+Push the locally built image to Azure Container Registry and run it in Azure Container Apps.
+
+A user-assigned managed identity was given the `AcrPull` role so the Container App could retrieve the private image without storing registry credentials.
+
+### Result
+
+The FastAPI backend became reachable through a public HTTPS endpoint in Azure.
+
+### What this taught
+
+Deployment identity and application identity are separate concerns. Managed identity handles Azure-to-Azure infrastructure access, while the application can still use its own authentication scheme for callers.
+
+---
+
+## Milestone: Securing the analytics API
+
+### Problem
+
+The first Azure API was publicly reachable and the analytics endpoint had no caller authentication.
+
+### Decision
+
+Add FastAPI `APIKeyHeader` authentication, store the secret in Azure Container Apps, and inject it through `FANTASY_API_KEY`.
+
+A Foundry custom connection stores the corresponding `x-api-key` credential as a secret for tool calls.
+
+### Result
+
+Requests without the key receive `401 Unauthorized`; valid authenticated requests can execute the analytics tool.
+
+### What this taught
+
+Secrets should be configuration, not source code. The OpenAPI contract can describe how authentication works without containing the secret itself.
+
+---
+
+## Milestone: Debugging the first Foundry tool failure
+
+### Problem
+
+The Foundry agent initially responded with fabricated placeholder players such as "Player A" and "Player B" instead of real backend results.
+
+### Investigation
+
+Foundry traces showed several chat/model spans but no tool-call span.
+
+### Root cause
+
+The custom OpenAPI tool had been created, but it was not actually attached and saved on the active agent version.
+
+### Resolution
+
+Attach `fantasy_player_research` to the agent, strengthen instructions against fabrication, save the agent version, and retry.
+
+### What this taught
+
+Agent orchestration must be observable. A hallucinated answer is not always evidence of bad data or a weak model; it can be evidence that the expected tool never ran.
+
+---
+
+## Milestone: First successful cloud agent loop
+
+### Result
+
+The Foundry agent successfully answered a league-specific waiver question with concrete player names and real target/snap/PPR evidence returned by the Azure-hosted API.
+
+### Why it matters
+
+This was the first time every major layer operated together:
+
+```text
+Foundry reasoning
+→ OpenAPI tool
+→ secret-backed connection
+→ Azure Container Apps
+→ FastAPI
+→ deterministic analytics
+→ DuckDB
+→ Sleeper + nflverse evidence
+→ user-facing explanation
+```
+
+The project now has a functioning production-shaped backend vertical slice and can move into frontend development.
+
+
 ---
 
 # 12. Framing the Future Public Write-Up
@@ -561,14 +815,15 @@ and more on the actual engineering problem:
 - How schedule-aware logic prevents partial NFL weeks from corrupting trend analysis.
 - How FastAPI and OpenAPI create the contract between deterministic analytics, AI agents, and a future frontend.
 - How Docker turns a local Python application into a portable cloud deployment artifact.
-- What Azure RBAC, resource-provider registration, Container Registry, and Container Apps taught during deployment.
+- What Azure RBAC, resource-provider registration, managed identity, Container Registry, Container Apps, and secret management taught during deployment.
+- How Foundry tracing exposed a tool-attachment failure that otherwise looked like an LLM hallucination problem.
 - Why the project begins with historical evidence and deliberately postpones true forecasting until a predictive model is justified.
 
 ---
 
 # 13. Short Portfolio Summary
 
-Fantasy Research Agent is an AI-powered fantasy football research application that combines Sleeper league context with nflverse NFL data. I built a Python analytics pipeline that normalizes player usage, snap counts, ownership, roster status, and schedule information into DuckDB, then exposed reusable research tools through FastAPI and OpenAPI. A Microsoft Foundry agent uses those deterministic tools for evidence instead of generating statistics itself. The application is being containerized with Docker and deployed to Azure Container Apps, with a frontend and predictive modeling layer planned next.
+Fantasy Research Agent is an AI-powered fantasy football research application that combines Sleeper league context with nflverse NFL data. I built a Python analytics pipeline that normalizes player usage, snap counts, ownership, roster status, and schedule information into DuckDB, then exposed reusable research tools through a secured FastAPI/OpenAPI service. The backend is containerized with Docker, stored in Azure Container Registry, and deployed to Azure Container Apps using managed identity for private image pulls. A GPT-4.1 mini agent in Microsoft Foundry calls the API through a secret-backed custom connection and explains deterministic league-specific evidence rather than inventing statistics. The first end-to-end cloud research query is working; the next major milestone is the frontend, followed by cloud-refreshable data, richer live context, and predictive modeling.
 
 ---
 
@@ -596,6 +851,7 @@ fantasy-research-agent/
 │   ├── database.py
 │   ├── nflverse.py
 │   ├── refresh_data.py
+│   ├── requirements-api.txt
 │   └── sleeper.py
 ├── data/
 │   ├── cache/
@@ -619,21 +875,77 @@ fantasy-research-agent/
 ```text
 Azure for Students
 └── Resource group: rg-fantasy-research-agent
-    ├── Microsoft Foundry resource
+    │
+    ├── Microsoft Foundry resource: fantasy-research-foundry-nj
     │   └── Project: fantasy-research-agent
     │       ├── GPT-4.1 mini deployment
-    │       └── fantasy-research-agent prompt agent
+    │       │   └── development allocation: 50K TPM
+    │       ├── prompt agent: fantasy-research-agent
+    │       ├── OpenAPI tool: fantasy_player_research
+    │       └── custom connection
+    │           └── secret credential: x-api-key
     │
-    ├── Container Apps environment: fantasy-research-api-env
-    │   └── fantasy-research-api app [deployment pending]
+    ├── User-assigned managed identity
+    │   └── fantasy-research-api-identity
+    │       └── AcrPull on private registry
     │
-    └── Azure Container Registry
-        └── fantasy-research-api image [push pending]
+    ├── Azure Container Registry
+    │   └── fantasy-research-api
+    │       ├── v1
+    │       └── v2  [API-key secured]
+    │
+    └── Azure Container Apps environment: fantasy-research-api-env
+        └── fantasy-research-api
+            ├── public HTTPS ingress
+            ├── FastAPI / Uvicorn
+            ├── Container Apps secret: fantasy-api-key
+            └── current DuckDB snapshot
 ```
 
-The cloud data architecture is intentionally **not treated as finished**.
+### Runtime request path
 
-The first deployment may package a DuckDB snapshot to prove the end-to-end Foundry → FastAPI → analytics path. A later milestone will move refreshable data into an Azure-backed storage design suitable for a continuously updated, multi-user application.
+```text
+Foundry agent
+    ↓
+fantasy_player_research
+    ↓
+Foundry custom connection supplies x-api-key
+    ↓ HTTPS
+Azure Container App
+    ↓
+FastAPI authenticates request
+    ↓
+search_players()
+    ↓
+DuckDB analytics
+    ↓
+structured evidence
+    ↓
+Foundry explanation
+```
+
+### Deployment path
+
+```text
+Source code + DuckDB snapshot
+    ↓
+local Docker build
+    ↓
+versioned container image
+    ↓
+Azure Container Registry
+    ↓ managed identity / AcrPull
+Azure Container Apps
+```
+
+### Important current limitation
+
+The cloud runtime still contains a **baked database snapshot**. This was intentional for the first vertical slice because it allowed the application, networking, authentication, tool calling, and cloud deployment path to be proven independently.
+
+The next backend phase will make the data layer refreshable in Azure. Likely options include a relational Azure database for application/league state plus scheduled synchronization and appropriate storage for analytical datasets.
+
+The project should not claim that the current cloud data is continuously live until that refresh layer exists.
+
 
 ---
 

@@ -5,3 +5,5 @@ duckdb
 pyarrow
 foundry-local-sdk==2.0.1
 openai
+fastapi
+uvicorn[standard]
